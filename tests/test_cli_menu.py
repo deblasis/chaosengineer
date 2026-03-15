@@ -28,3 +28,21 @@ class TestMenuHelpers:
         assert "1) Alpha" in text
         assert "2) Beta" in text
         assert "3) Gamma" in text
+
+
+class TestLetterKeyHotkeys:
+    def test_letter_key_selects_option(self):
+        """Pressing a letter key matching [X] prefix selects that option."""
+        from chaosengineer.cli_menu import _match_hotkey
+        options = ["[W] Wait for workers", "[K] Kill and pause", "[C] Continue"]
+        assert _match_hotkey("w", options) == 0
+        assert _match_hotkey("W", options) == 0
+        assert _match_hotkey("k", options) == 1
+        assert _match_hotkey("K", options) == 1
+        assert _match_hotkey("c", options) == 2
+        assert _match_hotkey("x", options) is None
+
+    def test_no_hotkey_brackets_returns_none(self):
+        from chaosengineer.cli_menu import _match_hotkey
+        options = ["Resume previous run", "Start fresh"]
+        assert _match_hotkey("r", options) is None

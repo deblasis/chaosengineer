@@ -1,6 +1,16 @@
 """Interactive arrow-key menu for CLI prompts."""
 from __future__ import annotations
+import re
 import sys
+
+
+def _match_hotkey(ch: str, options: list[str]) -> int | None:
+    """Match a single character against [X] hotkey prefixes in options."""
+    for i, opt in enumerate(options):
+        m = re.match(r"\[(\w)\]", opt)
+        if m and m.group(1).lower() == ch.lower():
+            return i
+    return None
 
 
 def _is_interactive() -> bool:
@@ -55,6 +65,11 @@ def _select_interactive(prompt: str, options: list[str], default: int) -> int:
                 _render(prompt, options, selected, first=False)
             elif ch == "\x03":
                 raise KeyboardInterrupt
+            else:
+                match = _match_hotkey(ch, options)
+                if match is not None:
+                    selected = match
+                    break
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         sys.stdout.write("\n")
