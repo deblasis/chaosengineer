@@ -24,7 +24,7 @@ from chaosengineer.core.state import (
 )
 from chaosengineer.core.budget import BudgetTracker
 from chaosengineer.metrics.logger import EventLogger, Event
-from chaosengineer.core.interfaces import DecisionMaker, DimensionPlan, ExperimentExecutor
+from chaosengineer.core.interfaces import DecisionMaker, DimensionPlan, ExperimentExecutor, ExperimentTask
 from chaosengineer.workloads.parser import WorkloadSpec
 
 
@@ -167,9 +167,12 @@ class Coordinator:
 
     def _run_iteration(
         self, plan: DimensionPlan, baseline: Baseline
-    ) -> list[tuple[Experiment, ExperimentResult | None]]:
+    ) -> list[tuple[Experiment, ExperimentResult]]:
         """Run all experiments for one dimension sweep from a given baseline."""
-        results: list[tuple[Experiment, ExperimentResult | None]] = []
+        # Phase 1: Build Experiment objects and task list
+        tasks: list[ExperimentTask] = []
+        experiment_workers: list[tuple[Experiment, WorkerState]] = []
+
         for i, params in enumerate(plan.values):
             exp_id = f"exp-{self._iteration}-{i}"
             exp = Experiment(
@@ -181,53 +184,41 @@ class Coordinator:
             )
             self.run_state.experiments.append(exp)
 
-            # Create a temporary worker
             worker = WorkerState(worker_id=f"w-{self._iteration}-{i}")
-
-            # State transitions
             assign_experiment(exp, worker.worker_id)
             assign_worker(worker, exp.experiment_id)
             start_experiment(exp)
 
-            # Execute
-            result: ExperimentResult | None = None
-            try:
-                result = self.executor.run_experiment(
-                    experiment_id=exp_id,
-                    params=params,
-                    command=self.spec.execution_command,
-                    baseline_commit=baseline.commit,
-                )
-                if result.error_message:
-                    fail_experiment(exp, result)
-                    self._log(Event(
-                        event="worker_failed",
-                        data={"experiment_id": exp_id, "error": result.error_message},
-                    ))
-                else:
-                    complete_experiment(exp, result)
-                    self._log(Event(
-                        event="worker_completed",
-                        data={
-                            "experiment_id": exp_id,
-                            "params": params,
-                            "result": result.to_dict(),
-                        },
-                    ))
-            except Exception as e:
-                error_result = ExperimentResult(
-                    primary_metric=0.0, error_message=str(e)
-                )
-                fail_experiment(exp, error_result)
+            tasks.append(ExperimentTask(
+                exp_id, params, self.spec.execution_command, baseline.commit,
+            ))
+            experiment_workers.append((exp, worker))
+
+        # Phase 2: Execute batch
+        batch_results = self.executor.run_experiments(tasks)
+
+        # Phase 3: Handle results
+        results: list[tuple[Experiment, ExperimentResult]] = []
+        for (exp, worker), result in zip(experiment_workers, batch_results):
+            if result.error_message:
+                fail_experiment(exp, result)
                 self._log(Event(
                     event="worker_failed",
-                    data={"experiment_id": exp_id, "error": str(e)},
+                    data={"experiment_id": exp.experiment_id, "error": result.error_message},
                 ))
-                result = None
-
+            else:
+                complete_experiment(exp, result)
+                self._log(Event(
+                    event="worker_completed",
+                    data={
+                        "experiment_id": exp.experiment_id,
+                        "params": exp.params,
+                        "result": result.to_dict(),
+                    },
+                ))
             release_worker(worker)
             self.budget.record_experiment()
-            self.budget.add_cost(result.cost_usd if result else 0.0)
+            self.budget.add_cost(result.cost_usd)
 
             results.append((exp, result))
 
@@ -236,7 +227,7 @@ class Coordinator:
     def _evaluate_iteration(
         self,
         plan: DimensionPlan,
-        results: list[tuple[Experiment, ExperimentResult | None]],
+        results: list[tuple[Experiment, ExperimentResult]],
         active_baselines: list[Baseline],
     ) -> list[Baseline]:
         """Evaluate iteration results. Returns updated active baselines."""
@@ -245,7 +236,6 @@ class Coordinator:
             (exp, res)
             for exp, res in results
             if exp.status == ExperimentStatus.COMPLETED
-            and res is not None
             and res.error_message is None
         ]
 
