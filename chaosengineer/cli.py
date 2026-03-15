@@ -30,6 +30,26 @@ def main():
         help="Directory for test output",
     )
 
+    # Run command: execute a workload
+    run_parser = subparsers.add_parser("run", help="Run a workload")
+    run_parser.add_argument(
+        "workload",
+        type=Path,
+        help="Path to workload spec markdown file",
+    )
+    run_parser.add_argument(
+        "--llm-backend",
+        choices=["claude-code", "sdk"],
+        default="claude-code",
+        help="LLM backend for coordinator decisions (default: claude-code)",
+    )
+    run_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(".chaosengineer/output"),
+        help="Directory for run output",
+    )
+
     # Version
     subparsers.add_parser("version", help="Print version")
 
@@ -57,6 +77,20 @@ def main():
                 if not result.passed:
                     all_passed = False
             sys.exit(0 if all_passed else 1)
+
+    elif args.command == "run":
+        from chaosengineer.workloads.parser import parse_workload_spec
+        from chaosengineer.llm import create_decision_maker
+
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        spec = parse_workload_spec(args.workload)
+
+        llm_dir = args.output_dir / "llm_decisions"
+        llm_dir.mkdir(parents=True, exist_ok=True)
+
+        dm = create_decision_maker(args.llm_backend, spec, llm_dir)
+        print(f"Created {args.llm_backend} decision maker for workload: {spec.name}")
+        print("(Full coordinator integration is Sub-project C)")
 
     else:
         parser.print_help()
