@@ -97,10 +97,19 @@ class Coordinator:
                     )
                     if remaining <= 0:
                         break
+                    original_count = len(plan.values)
                     plan = DimensionPlan(
                         dimension_name=plan.dimension_name,
                         values=plan.values[:remaining],
                     )
+                    self.logger.log(Event(
+                        event="budget_trim",
+                        data={
+                            "dimension": plan.dimension_name,
+                            "original_count": original_count,
+                            "trimmed_count": remaining,
+                        },
+                    ))
 
                 self.logger.log(Event(
                     event="iteration_started",

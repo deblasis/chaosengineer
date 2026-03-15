@@ -251,6 +251,35 @@ class TestCoordinatorFailedExperiment:
         assert len(failed) == 1
 
 
+class TestCoordinatorBudgetTrimming:
+    def test_budget_trim_logs_warning(self, tmp_output_dir):
+        spec = _make_spec(budget=BudgetConfig(max_experiments=3))
+        plans = [
+            DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}, {"lr": 0.08}]),
+            DimensionPlan(dimension_name="depth", values=[{"d": 6}, {"d": 12}]),
+        ]
+        results = {
+            "exp-0-0": ExperimentResult(primary_metric=0.93),
+            "exp-0-1": ExperimentResult(primary_metric=0.95),
+            "exp-1-0": ExperimentResult(primary_metric=0.90),
+        }
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="abc", metric_value=0.97, metric_name="val_bpb"),
+        )
+
+        coordinator.run()
+
+        trim_events = coordinator.logger.read_events(event_type="budget_trim")
+        assert len(trim_events) == 1
+        assert trim_events[0]["original_count"] == 2
+        assert trim_events[0]["trimmed_count"] == 1
+
+
 class TestCoordinatorRunId:
     def test_custom_run_id(self, tmp_output_dir):
         spec = _make_spec()
