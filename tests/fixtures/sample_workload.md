@@ -20,7 +20,7 @@ Constraint: depth * 64 must stay under 1024 for memory
 - Type: automatic
 - Metric: val_bpb (lower is better)
 - Parse: `grep "^val_bpb:" run.log`
-- Secondary metrics: peak_vram_mb
+- Secondary metrics: train_loss, perplexity
 
 ## Resources
 - Per worker: 1 GPU

@@ -147,6 +147,14 @@ def _parse_evaluation(text: str) -> tuple[str, str, str, str]:
     return eval_type, metric_name, direction, parse_cmd
 
 
+def _parse_secondary_metrics(text: str) -> list[str]:
+    """Parse secondary metric names from evaluation section."""
+    match = re.search(r"Secondary metrics?:\s*(.+)", text, re.IGNORECASE)
+    if not match:
+        return []
+    return [m.strip() for m in match.group(1).split(",") if m.strip()]
+
+
 def _parse_workers_available(text: str) -> int:
     match = re.search(r"Available:\s*(\d+)", text)
     return int(match.group(1)) if match else 1
@@ -210,6 +218,7 @@ def parse_workload_spec(
     # Evaluation
     eval_section = sections.get("Evaluation", "")
     eval_type, metric_name, direction, parse_cmd = _parse_evaluation(eval_section)
+    secondary = _parse_secondary_metrics(eval_section)
 
     # Resources
     resources_section = sections.get("Resources", "")
@@ -233,6 +242,7 @@ def parse_workload_spec(
         primary_metric=metric_name,
         metric_direction=direction,
         metric_parse_command=parse_cmd,
+        secondary_metrics=secondary,
         workers_available=workers,
         budget=budget,
         modifiable_files=modifiable_files,
