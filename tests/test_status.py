@@ -24,15 +24,6 @@ class TestStatusFormatting:
         assert "00:03:42" in line
         assert "Ctrl+C to pause" in line
 
-    def test_format_breakthrough(self):
-        sd = StatusDisplay()
-        line = sd._format_progress(
-            iteration=1, completed=3, total=4,
-            cost=0.42, elapsed=255.0,
-            breakthrough=("val_bpb", 0.93),
-        )
-        assert "New best: val_bpb=0.93" in line
-
     def test_on_worker_done_writes_stderr(self):
         sd = StatusDisplay()
         sd._iteration = 1

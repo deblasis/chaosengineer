@@ -61,9 +61,6 @@ class StatusDisplay:
         )
         print(f"\r{line} | best={best_metric}", file=sys.stderr)
 
-    def on_breakthrough(self, metric_name: str, value: float) -> None:
-        pass
-
     def _elapsed(self) -> float:
         if self._start_time is None:
             return 0.0
@@ -76,7 +73,6 @@ class StatusDisplay:
         total: int,
         cost: float,
         elapsed: float,
-        breakthrough: tuple[str, float] | None = None,
     ) -> str:
         h, rem = divmod(int(elapsed), 3600)
         m, s = divmod(rem, 60)
@@ -89,11 +85,6 @@ class StatusDisplay:
         parts.append(time_str)
 
         line = "[" + " | ".join(parts) + "]"
-
-        if breakthrough:
-            name, val = breakthrough
-            line += f" New best: {name}={val}"
-        else:
-            line += " Ctrl+C to pause"
+        line += " Ctrl+C to pause"
 
         return line
