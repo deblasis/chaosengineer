@@ -1,0 +1,39 @@
+scenario: "breakthrough triggers baseline update"
+description: >
+  Two workers test a directional dimension. One finds an improvement,
+  triggering a new baseline. The coordinator should advance and continue.
+
+initial_baseline:
+  commit: "abc1234"
+  metric_value: 0.97
+  metric_name: "val_bpb"
+
+workload:
+  name: "test-workload"
+  primary_metric: "val_bpb"
+  metric_direction: "lower"
+  execution_command: "echo test"
+  workers_available: 2
+  budget:
+    max_experiments: 4
+
+plans:
+  - dimension_name: "lr"
+    values:
+      - { lr: 0.02 }
+      - { lr: 0.08 }
+  - dimension_name: "depth"
+    values:
+      - { depth: 6 }
+      - { depth: 12 }
+
+results:
+  "exp-0-0": { primary_metric: 0.91 }
+  "exp-0-1": { primary_metric: 0.95 }
+  "exp-1-0": { primary_metric: 0.88 }
+  "exp-1-1": { primary_metric: 0.90 }
+
+expected:
+  final_best_metric: 0.88
+  total_experiments: 4
+  breakthroughs: 2
