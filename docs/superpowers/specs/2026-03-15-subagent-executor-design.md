@@ -9,7 +9,7 @@ SubagentExecutor implements `ExperimentExecutor` to run real experiments via Cla
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Subagent behavior | Hybrid | Gets params + modifiable_files + constraints; uses LLM reasoning to apply params, then executes command |
-| Git workflow | Worktree + commit + branch | Named branch per experiment (`chaosengineer/<experiment_id>`), coordinator merges breakthroughs |
+| Git workflow | Worktree + commit + branch | Named branch per experiment (`chaosengineer/<run_id>/<experiment_id>`), coordinator merges breakthroughs |
 | Parallelism | Batch method on executor | `run_experiments(tasks) -> results`; coordinator stays synchronous, executor owns concurrency |
 | Invocation | `claude -p` with task file | Write task to markdown file, avoids shell escaping, serves as audit trail |
 | Result collection | Output file | Subagent writes `result.json` to experiment output directory |
@@ -66,15 +66,15 @@ chaosengineer/execution/
 
 ### SubagentExecutor (`subagent.py`)
 
-Implements `run_experiment()` and overrides `run_experiments()`. Wires together TaskPacketBuilder, WorktreeManager, and ResultParser. For `run_experiments()`, uses `concurrent.futures.ThreadPoolExecutor` with `max_workers` matching batch size in parallel mode, or 1 in sequential mode.
+Implements `run_experiment()` and overrides `run_experiments()`. Wires together TaskPacketBuilder, WorktreeManager, and ResultParser. For `run_experiments()`, uses `concurrent.futures.ThreadPoolExecutor` with `max_workers` matching batch size in parallel mode, or 1 in sequential mode. Each `Future.result()` is wrapped in try/except to convert thread-level crashes into error `ExperimentResult` objects, mirroring the coordinator's existing exception handling pattern.
 
 ### TaskPacketBuilder (`task_packet.py`)
 
-Takes `ExperimentTask` + `WorkloadSpec` context (modifiable_files, constraints_text, metric_parse_command, time_budget_seconds) and generates a markdown task file. Owns the prompt template. Writes to experiment output directory.
+Takes `ExperimentTask` + full `WorkloadSpec` and generates a markdown task file. Uses fields: `modifiable_files`, `constraints_text`, `metric_parse_command`, `time_budget_seconds`, `primary_metric`, `metric_direction`, `execution_command`. Owns the prompt template. Writes to experiment output directory.
 
 ### WorktreeManager (`worktree.py`)
 
-Creates worktree from `baseline_commit`, creates experiment branch (`chaosengineer/<experiment_id>`), cleans up worktree after results are collected. The branch persists even after worktree removal.
+Creates worktree from `baseline_commit`, creates experiment branch (`chaosengineer/<run_id>/<experiment_id>`), cleans up worktree after results are collected. The branch persists even after worktree removal. The `run_id` prefix prevents branch name collisions across runs.
 
 ### ResultParser (`result_parser.py`)
 
@@ -102,32 +102,43 @@ When `scripted_results` is a directory, all YAML files in the folder are loaded 
 Each experiment (potentially running in a thread) follows this pipeline:
 
 ```
-1. WorktreeManager.create(baseline_commit, experiment_id)
-   → git worktree add .chaosengineer/worktrees/<experiment_id> -b chaosengineer/<experiment_id> <baseline_commit>
+1. WorktreeManager.create(baseline_commit, run_id, experiment_id)
+   → git worktree add .chaosengineer/worktrees/<experiment_id> -b chaosengineer/<run_id>/<experiment_id> <baseline_commit>
    → returns worktree_path
 
-2. TaskPacketBuilder.build(task, spec_context, worktree_path, result_file_path)
+2. TaskPacketBuilder.build(task, spec, worktree_path, result_file_path)
    → writes .chaosengineer/output/<experiment_id>/task.md
    → returns task_file_path
 
-3. SubagentExecutor._invoke(task_file_path, worktree_path, timeout)
-   → subprocess.run(["claude", "-p", "$(cat task.md)", "--allowedTools", "Edit,Write,Bash,Read", "-C", worktree_path])
+3. SubagentExecutor._invoke(task_file_path, worktree_path, timeout, resource)
+   → prompt = task_file_path.read_text()  # read file in Python, not shell expansion
+   → env = {**os.environ}; if resource: env["CUDA_VISIBLE_DEVICES"] = parse_gpu(resource)
+   → subprocess.run(["claude", "-p", prompt, "--allowedTools", "Edit,Write,Bash,Read"],
+                     cwd=worktree_path, env=env, timeout=timeout)
    → if time_budget_seconds set: timeout = budget + 60s grace
+   → if time_budget_seconds is None: timeout = None (no limit)
    → if TimeoutExpired: kill process, return error ExperimentResult
    → returns subprocess CompletedProcess
 
-4. ResultParser.parse(result_file_path, experiment_id)
+4. ResultParser.parse(result_file_path, experiment_id, duration_seconds)
    → reads .chaosengineer/output/<experiment_id>/result.json
    → validates primary_metric exists
+   → sets duration_seconds from wall-clock timing (measured by SubagentExecutor)
    → if file missing/malformed: returns ExperimentResult(primary_metric=0, error_message="...")
    → returns ExperimentResult
 
 5. WorktreeManager.cleanup(worktree_path)
    → git worktree remove .chaosengineer/worktrees/<experiment_id>
-   → branch chaosengineer/<experiment_id> persists with the commit
+   → branch chaosengineer/<run_id>/<experiment_id> persists with the commit
 ```
 
-**Resource handling:** If `resource` is non-empty (e.g., `"gpu:0"`), `CUDA_VISIBLE_DEVICES` is set in the subprocess environment. The numeric suffix is extracted from the resource string.
+**Resource handling:** If `resource` is non-empty (e.g., `"gpu:0"`), `CUDA_VISIBLE_DEVICES` is set in the subprocess environment. The numeric suffix is extracted from the resource string. Resource assignment is currently out of scope — the `resource` field will be `""` for all workers. GPU assignment can be added in a future phase by mapping `workers_available` to device IDs.
+
+**Timing and cost:** `SubagentExecutor` measures wall-clock `duration_seconds` around the subprocess call and passes it to `ResultParser`. `tokens_in`, `tokens_out`, and `cost_usd` remain 0 for Claude Code subscription-based execution (no per-call cost tracking). This means `max_api_cost` budget limits will not trigger for subagent execution — only `max_experiments`, `max_wall_time_seconds`, and `max_plateau_iterations` are effective budget constraints.
+
+**Tool permissions:** The subagent gets `Edit,Write,Bash,Read` (broader than ClaudeCodeHarness's `Write`-only) because experiment execution requires modifying code, running shell commands, and reading files — not just writing JSON output.
+
+**Timeout defaults:** `WorkloadSpec.time_budget_seconds` defaults to 300 in the parser. To support long-running experiments with no per-experiment limit, the parser will be updated to treat an absent `Time budget` field as `None` instead of defaulting to 300. When `None`, no subprocess timeout is applied.
 
 ## Task Prompt Template
 
@@ -145,7 +156,7 @@ Report the results as a JSON file.
 
 ## Working Directory
 You are working in a git worktree at: {worktree_path}
-Branch: chaosengineer/{experiment_id}
+Branch: chaosengineer/{run_id}/{experiment_id}
 
 ## Modifiable Files
 {modifiable_files list, or "Any files" if empty}
@@ -183,24 +194,56 @@ Primary metric name: {primary_metric} ({metric_direction} is better)
 
 ## Coordinator Changes
 
-Minimal changes to the coordinator's inner experiment loop:
+The existing `_run_iteration` loop iterates `for i, params in enumerate(plan.values)`, creates an `Experiment` and ephemeral `WorkerState` per experiment, then calls `self.executor.run_experiment()` inline. The batch refactor splits this into two phases: prepare tasks, then execute and handle results.
 
 ```python
-# Build task list for the iteration
-tasks = [
-    ExperimentTask(exp_id, params, command, baseline.commit, worker.resource)
-    for worker_id, (exp_id, params) in zip(workers, experiments)
-]
+def _run_iteration(self, plan, baseline):
+    results = []
 
-# Run batch (sequential or parallel depending on executor)
-results = self.executor.run_experiments(tasks)
+    # Phase 1: Build Experiment objects and task list
+    tasks = []
+    experiments = []
+    for i, params in enumerate(plan.values):
+        exp_id = f"exp-{self._iteration}-{i}"
+        exp = Experiment(
+            experiment_id=exp_id,
+            dimension=plan.dimension_name,
+            params=params,
+            baseline_commit=baseline.commit,
+            branch_id=baseline.branch_id,
+        )
+        self.run_state.experiments.append(exp)
+        worker = WorkerState(worker_id=f"w-{self._iteration}-{i}")
+        assign_experiment(exp, worker.worker_id)
+        assign_worker(worker, exp.experiment_id)
+        start_experiment(exp)
 
-# Handle results same as before, one at a time
-for task, result in zip(tasks, results):
-    # existing: check error, complete/fail experiment, log events, update budget
+        tasks.append(ExperimentTask(exp_id, params, self.spec.execution_command, baseline.commit))
+        experiments.append((exp, worker))
+
+    # Phase 2: Execute batch (sequential or parallel depending on executor)
+    batch_results = self.executor.run_experiments(tasks)
+
+    # Phase 3: Handle results one at a time (same logic as before)
+    for (exp, worker), result in zip(experiments, batch_results):
+        if result.error_message:
+            fail_experiment(exp, result)
+            self._log(Event(event="worker_failed", data={...}))
+        else:
+            complete_experiment(exp, result)
+            self._log(Event(event="worker_completed", data={...}))
+        release_worker(worker)
+        self.budget.record_experiment()
+        self.budget.add_cost(result.cost_usd if result else 0.0)
+        results.append((exp, result))
+
+    return results
 ```
 
-All existing coordinator logic (state transitions, event logging, budget tracking, breakthrough detection) remains unchanged.
+**Behavioral changes from batching:**
+- All experiments in an iteration are started (state: RUNNING) before any complete. This is accurate — they are conceptually running simultaneously.
+- Budget tracking (`record_experiment`, `add_cost`) happens after the batch returns, not between experiments. This means the coordinator cannot abort mid-iteration if budget is exceeded — it completes the full iteration then checks. This is acceptable: budget checks between iterations already exist in the outer `run()` loop.
+- Event logging timestamps for `worker_completed`/`worker_failed` will reflect when results are processed (post-batch), not when individual experiments finish. The actual experiment duration is captured in `result.duration_seconds`.
 
 ## CLI Changes
 
@@ -238,7 +281,7 @@ coordinator.run()
 | Unit | TaskPacketBuilder, WorktreeManager, ResultParser, SubagentExecutor (mocked deps) | ~20 |
 | Integration | Coordinator + batch `run_experiments()` with ScriptedExecutor | ~8 |
 | End-to-end | CLI → Coordinator → ScriptedExecutor, file and folder-based scripted results | ~5 |
-| Existing | All 117 current tests pass unchanged | 117 |
+| Existing | All 117 current tests pass unchanged (fix 2 collection errors in test_runner.py, test_shipped_scenarios.py) | 117 |
 
 **~33 new tests, ~150 total.**
 
