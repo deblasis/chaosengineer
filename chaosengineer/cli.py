@@ -39,7 +39,7 @@ def main():
     )
     run_parser.add_argument(
         "--llm-backend",
-        choices=["claude-code", "sdk"],
+        choices=["claude-code", "sdk", "scripted"],
         default="claude-code",
         help="LLM backend for coordinator decisions (default: claude-code)",
     )
@@ -59,6 +59,11 @@ def main():
         "--scripted-results",
         type=Path,
         help="YAML file or folder with canned results (required for --executor=scripted)",
+    )
+    run_parser.add_argument(
+        "--scripted-plans",
+        type=Path,
+        help="YAML file with scripted dimension plans (required for --llm-backend=scripted)",
     )
     run_parser.add_argument(
         "--output-dir",
@@ -117,16 +122,25 @@ def _execute_run(args):
         print("Error: --scripted-results is required when using --executor=scripted", file=sys.stderr)
         sys.exit(1)
 
+    if args.llm_backend == "scripted" and args.scripted_plans is None:
+        print("Error: --scripted-plans is required when using --llm-backend=scripted", file=sys.stderr)
+        sys.exit(1)
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     spec = parse_workload_spec(args.workload)
 
     # Generate a single run_id for both coordinator and executor
     run_id = f"run-{uuid.uuid4().hex[:8]}"
 
-    llm_dir = args.output_dir / "llm_decisions"
-    llm_dir.mkdir(parents=True, exist_ok=True)
-
-    dm = create_decision_maker(args.llm_backend, spec, llm_dir)
+    if args.llm_backend == "scripted":
+        from chaosengineer.workloads.plan_loader import load_scripted_plans
+        from chaosengineer.testing.simulator import ScriptedDecisionMaker
+        plans = load_scripted_plans(args.scripted_plans)
+        dm = ScriptedDecisionMaker(plans)
+    else:
+        llm_dir = args.output_dir / "llm_decisions"
+        llm_dir.mkdir(parents=True, exist_ok=True)
+        dm = create_decision_maker(args.llm_backend, spec, llm_dir)
     executor = create_executor(
         args.executor, spec, args.output_dir, args.mode,
         scripted_results=args.scripted_results,

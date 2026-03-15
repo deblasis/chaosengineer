@@ -20,6 +20,7 @@ class TestCliRunArgs:
                     command="run", workload=Path("workload.md"),
                     executor="subagent", mode="sequential",
                     llm_backend="claude-code", scripted_results=None,
+                    scripted_plans=None,
                     output_dir=Path(".chaosengineer/output"),
                 )
                 with patch("chaosengineer.cli._execute_run"):
@@ -57,6 +58,7 @@ class TestCliRunArgs:
                     executor="scripted", mode="sequential",
                     llm_backend="claude-code",
                     scripted_results=Path("results.yaml"),
+                    scripted_plans=None,
                     output_dir=Path(".chaosengineer/output"),
                 )
                 with patch("chaosengineer.cli._execute_run"):
