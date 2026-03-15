@@ -264,6 +264,13 @@ def _execute_run(args):
         metric_name=spec.primary_metric,
     )
 
+    from chaosengineer.core.pause import PauseController
+    from chaosengineer.core.status import StatusDisplay
+
+    pause_controller = PauseController()
+    status_display = StatusDisplay()
+    pause_controller.set_executor(executor)
+
     coordinator = Coordinator(
         spec=spec,
         decision_maker=dm,
@@ -272,6 +279,8 @@ def _execute_run(args):
         budget=budget,
         initial_baseline=initial_baseline,
         run_id=run_id,
+        pause_controller=pause_controller,
+        status_display=status_display,
     )
 
     print(f"Starting run: {spec.name}")
@@ -279,7 +288,11 @@ def _execute_run(args):
     print(f"  Executor: {args.executor} ({args.mode})")
     print(f"  Output: {args.output_dir}")
 
-    coordinator.run()
+    pause_controller.install()
+    try:
+        coordinator.run()
+    finally:
+        pause_controller.uninstall()
 
     print(f"\nRun complete:")
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")
@@ -402,6 +415,13 @@ def _execute_resume(args):
     )
     logger = EventLogger(events_path)
 
+    from chaosengineer.core.pause import PauseController
+    from chaosengineer.core.status import StatusDisplay
+
+    pause_controller = PauseController()
+    status_display = StatusDisplay()
+    pause_controller.set_executor(executor)
+
     coordinator = Coordinator(
         spec=spec,
         decision_maker=dm,
@@ -410,6 +430,8 @@ def _execute_resume(args):
         budget=budget_tracker,
         initial_baseline=snapshot.active_baselines[0] if snapshot.active_baselines else Baseline("HEAD", 0.0, spec.primary_metric),
         run_id=snapshot.run_id,
+        pause_controller=pause_controller,
+        status_display=status_display,
     )
     extensions = {}
     if args.add_cost > 0:
@@ -418,10 +440,14 @@ def _execute_resume(args):
         extensions["add_experiments"] = args.add_experiments
     if args.add_time > 0:
         extensions["add_time"] = args.add_time
-    coordinator.resume_from_snapshot(
-        snapshot, restart_iteration=args.restart_iteration,
-        budget_extensions=extensions or None,
-    )
+    pause_controller.install()
+    try:
+        coordinator.resume_from_snapshot(
+            snapshot, restart_iteration=args.restart_iteration,
+            budget_extensions=extensions or None,
+        )
+    finally:
+        pause_controller.uninstall()
 
     print(f"\nRun complete:")
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")

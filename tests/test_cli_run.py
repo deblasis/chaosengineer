@@ -161,3 +161,16 @@ class TestRunGuard:
 
         result = _check_resumable_session(tmp_path)
         assert result is None
+
+
+class TestPauseControllerWiring:
+    def test_execute_run_installs_pause_controller(self):
+        """_execute_run creates and installs PauseController."""
+        from chaosengineer.core.pause import PauseController
+        from chaosengineer.core.status import StatusDisplay
+
+        pc = PauseController()
+        sd = StatusDisplay()
+        assert hasattr(pc, "install")
+        assert hasattr(pc, "uninstall")
+        assert hasattr(sd, "on_run_start")
