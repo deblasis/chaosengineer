@@ -1,0 +1,45 @@
+scenario: "tie branching creates parallel baselines"
+description: >
+  Three options are tested. Two tie for best, triggering beam search.
+  Each branch is explored, and the best overall result wins.
+
+initial_baseline:
+  commit: "abc1234"
+  metric_value: 0.97
+  metric_name: "val_bpb"
+
+workload:
+  name: "tie-test"
+  primary_metric: "val_bpb"
+  metric_direction: "lower"
+  execution_command: "echo test"
+  workers_available: 3
+  budget:
+    max_experiments: 10
+
+plans:
+  - dimension_name: "activation"
+    values:
+      - { act: "GeLU" }
+      - { act: "SiLU" }
+      - { act: "ReLU" }
+  # Branch explorations after tie
+  - dimension_name: "depth_from_GeLU"
+    values:
+      - { depth: 10 }
+  - dimension_name: "depth_from_SiLU"
+    values:
+      - { depth: 10 }
+
+results:
+  # GeLU and SiLU tie, ReLU is worse
+  "exp-0-0": { primary_metric: 0.91 }
+  "exp-0-1": { primary_metric: 0.911 }
+  "exp-0-2": { primary_metric: 0.98 }
+  # Branch results
+  "exp-1-0": { primary_metric: 0.87 }
+  "exp-2-0": { primary_metric: 0.90 }
+
+expected:
+  final_best_metric: 0.87
+  total_experiments: 5

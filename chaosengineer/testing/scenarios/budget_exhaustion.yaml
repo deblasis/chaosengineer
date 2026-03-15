@@ -1,0 +1,37 @@
+scenario: "budget exhaustion stops execution"
+description: >
+  Coordinator has budget for 3 experiments. First iteration uses 2,
+  second iteration is trimmed to 1, then stops.
+
+initial_baseline:
+  commit: "abc1234"
+  metric_value: 0.97
+  metric_name: "val_bpb"
+
+workload:
+  name: "budget-test"
+  primary_metric: "val_bpb"
+  metric_direction: "lower"
+  execution_command: "echo test"
+  workers_available: 2
+  budget:
+    max_experiments: 3
+
+plans:
+  - dimension_name: "lr"
+    values:
+      - { lr: 0.02 }
+      - { lr: 0.08 }
+  - dimension_name: "depth"
+    values:
+      - { depth: 6 }
+      - { depth: 12 }
+
+results:
+  "exp-0-0": { primary_metric: 0.93 }
+  "exp-0-1": { primary_metric: 0.95 }
+  "exp-1-0": { primary_metric: 0.90 }
+
+expected:
+  final_best_metric: 0.90
+  total_experiments: 3
