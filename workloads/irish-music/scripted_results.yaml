@@ -1,0 +1,94 @@
+# Scripted results for the Irish folk music experiment.
+# Keyed by exp-{iteration}-{index} (0-indexed).
+# Baseline val_bpb: 2.08
+# Final best: 0.97 (6 keeps, 12 discards)
+
+# Exp 1: depth 12 — worse (discard)
+"exp-0-0":
+  primary_metric: 2.15
+  secondary_metrics: { num_steps: 45, peak_vram_mb: 48000 }
+
+# Exp 2: batch_size 131072 — big improvement (keep)
+"exp-1-0":
+  primary_metric: 1.44
+  secondary_metrics: { num_steps: 180, peak_vram_mb: 42000 }
+
+# Exp 3: batch_size 32768 — another big improvement (keep)
+"exp-2-0":
+  primary_metric: 1.03
+  secondary_metrics: { num_steps: 420, peak_vram_mb: 38000 }
+
+# Exp 4: batch_size 16384 — slight improvement (keep)
+"exp-3-0":
+  primary_metric: 1.01
+  secondary_metrics: { num_steps: 650, peak_vram_mb: 36000 }
+
+# Exp 5: depth 10 — worse (discard)
+"exp-4-0":
+  primary_metric: 1.05
+  secondary_metrics: { num_steps: 500, peak_vram_mb: 40000 }
+
+# Exp 6: learning_rate 0.08 — didn't help (discard)
+"exp-5-0":
+  primary_metric: 1.03
+  secondary_metrics: { num_steps: 650, peak_vram_mb: 36000 }
+
+# Exp 7: aspect_ratio 32 — broke through 1.0 (keep)
+"exp-6-0":
+  primary_metric: 0.99
+  secondary_metrics: { num_steps: 1070, peak_vram_mb: 30000 }
+
+# Exp 8: aspect_ratio 24 — slight improvement (keep)
+"exp-7-0":
+  primary_metric: 0.985
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 9: warmup 5% — helped (keep)
+"exp-8-0":
+  primary_metric: 0.97
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 10: warmup 10% — didn't help (discard)
+"exp-9-0":
+  primary_metric: 0.98
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 11: cooldown 30% — didn't help (discard)
+"exp-10-0":
+  primary_metric: 0.975
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 12: SSSS window — slightly worse (discard)
+"exp-11-0":
+  primary_metric: 0.98
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 13: weight_decay 0.01 — didn't help (discard)
+"exp-12-0":
+  primary_metric: 0.975
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 14: weight_decay 0.1 — worse (discard)
+"exp-13-0":
+  primary_metric: 0.99
+  secondary_metrics: { num_steps: 1200, peak_vram_mb: 26000 }
+
+# Exp 15: value_embeddings — didn't help (discard)
+"exp-14-0":
+  primary_metric: 0.972
+  secondary_metrics: { num_steps: 1100, peak_vram_mb: 28000 }
+
+# Exp 16: head_dim 64 — didn't help (discard)
+"exp-15-0":
+  primary_metric: 0.98
+  secondary_metrics: { num_steps: 1300, peak_vram_mb: 24000 }
+
+# Exp 17: head_dim 96 — didn't help (discard)
+"exp-16-0":
+  primary_metric: 0.975
+  secondary_metrics: { num_steps: 1250, peak_vram_mb: 25000 }
+
+# Exp 18: aspect_ratio 28 — didn't help (discard)
+"exp-17-0":
+  primary_metric: 0.978
+  secondary_metrics: { num_steps: 1150, peak_vram_mb: 27000 }

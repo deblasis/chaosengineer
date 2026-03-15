@@ -1,0 +1,96 @@
+# Scripted dimension plans for the Irish folk music experiment.
+# Faithful reproduction of ~18 experiments from:
+#   "I Used Karpathy's Autoresearch to Train a Music-Generating AI Model!"
+#   Channel: Onchain AI Garage
+# Baseline val_bpb: 2.08
+
+plans:
+  # Exp 1 (exp-0-0): Increased depth to 12 — worse, too slow for small dataset
+  - dimension_name: depth
+    values:
+      - depth: 12
+
+  # Exp 2 (exp-1-0): Reduced batch size from 2^19 to 2^17 — big improvement
+  - dimension_name: batch_size
+    values:
+      - batch_size: 131072
+
+  # Exp 3 (exp-2-0): Reduced batch size further to 2^15
+  - dimension_name: batch_size
+    values:
+      - batch_size: 32768
+
+  # Exp 4 (exp-3-0): Reduced batch size to 2^14 (16k tokens)
+  - dimension_name: batch_size
+    values:
+      - batch_size: 16384
+
+  # Exp 5 (exp-4-0): Tried depth 10 with smaller batch — worse
+  - dimension_name: depth
+    values:
+      - depth: 10
+
+  # Exp 6 (exp-5-0): Higher learning rate — didn't help
+  - dimension_name: learning_rate
+    values:
+      - learning_rate: 0.08
+
+  # Exp 7 (exp-6-0): Reduced aspect ratio to 32 — broke through 1.0
+  - dimension_name: aspect_ratio
+    values:
+      - aspect_ratio: 32
+
+  # Exp 8 (exp-7-0): Reduced aspect ratio to 24 — slight improvement
+  - dimension_name: aspect_ratio
+    values:
+      - aspect_ratio: 24
+
+  # Exp 9 (exp-8-0): Added warmup at 5% — helped
+  - dimension_name: warmup_fraction
+    values:
+      - warmup_fraction: 0.05
+
+  # Exp 10 (exp-9-0): Increased warmup to 10% — didn't help
+  - dimension_name: warmup_fraction
+    values:
+      - warmup_fraction: 0.10
+
+  # Exp 11 (exp-10-0): Reduced cooldown from 50% to 30% — didn't help
+  - dimension_name: cooldown_fraction
+    values:
+      - cooldown_fraction: 0.30
+
+  # Exp 12 (exp-11-0): All sliding windows (SSSS) — slightly worse
+  - dimension_name: window_pattern
+    values:
+      - window_pattern: SSSS
+
+  # Exp 13 (exp-12-0): Weight decay 0.01
+  - dimension_name: weight_decay
+    values:
+      - weight_decay: 0.01
+
+  # Exp 14 (exp-13-0): Weight decay 0.1
+  - dimension_name: weight_decay
+    values:
+      - weight_decay: 0.1
+
+  # Exp 15 (exp-14-0): Value embeddings on
+  - dimension_name: value_embeddings
+    values:
+      - value_embeddings: true
+
+  # Exp 16 (exp-15-0): Head dim 64
+  - dimension_name: head_dim
+    values:
+      - head_dim: 64
+
+  # Exp 17 (exp-16-0): Head dim 96
+  - dimension_name: head_dim
+    values:
+      - head_dim: 96
+
+  # Exp 18 (exp-17-0): Aspect ratio 28 + head dim 96 combo
+  - dimension_name: aspect_ratio
+    values:
+      - aspect_ratio: 28
