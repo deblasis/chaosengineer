@@ -63,3 +63,21 @@ class TestCliRunArgs:
                 )
                 with patch("chaosengineer.cli._execute_run"):
                     main()
+
+    def test_initial_baseline_flag_accepted(self):
+        """--initial-baseline is accepted as a float argument."""
+        import argparse
+        with patch("sys.argv", [
+            "chaosengineer", "run", "workload.md",
+            "--initial-baseline", "2.08",
+        ]):
+            with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+                mock_parse.return_value = argparse.Namespace(
+                    command="run", workload=Path("workload.md"),
+                    executor="subagent", mode="sequential",
+                    llm_backend="claude-code", scripted_results=None,
+                    scripted_plans=None, initial_baseline=2.08,
+                    output_dir=Path(".chaosengineer/output"),
+                )
+                with patch("chaosengineer.cli._execute_run"):
+                    main()

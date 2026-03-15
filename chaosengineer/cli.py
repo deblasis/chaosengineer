@@ -71,6 +71,12 @@ def main():
         default=Path(".chaosengineer/output"),
         help="Directory for run output",
     )
+    run_parser.add_argument(
+        "--initial-baseline",
+        type=float,
+        default=None,
+        help="Override initial baseline metric value",
+    )
 
     # Version
     subparsers.add_parser("version", help="Print version")
