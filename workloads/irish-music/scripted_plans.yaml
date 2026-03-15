@@ -90,7 +90,7 @@ plans:
     values:
       - head_dim: 96
 
-  # Exp 18 (exp-17-0): Aspect ratio 28 + head dim 96 combo
+  # Exp 18 (exp-17-0): Reduced aspect ratio to 28
   - dimension_name: aspect_ratio
     values:
       - aspect_ratio: 28
