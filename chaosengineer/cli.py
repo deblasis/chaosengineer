@@ -113,11 +113,11 @@ def main():
         parser.print_help()
 
 
-def detect_baseline(spec) -> float:
+def detect_baseline(spec: "WorkloadSpec") -> float:
     """Run the workload once to measure the initial baseline metric."""
     import subprocess
 
-    print(f"No baseline specified. Running workload to measure initial baseline...")
+    print("No baseline specified. Running workload to measure initial baseline...")
 
     result = subprocess.run(
         spec.execution_command, shell=True, capture_output=True, text=True,
