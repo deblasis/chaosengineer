@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 
 from chaosengineer.core.models import (
@@ -66,6 +67,7 @@ class Coordinator:
             },
         ))
         self.budget.start()
+        self.run_state.start_time = time.time()
 
         active_baselines = [self.best_baseline]
 
@@ -134,10 +136,16 @@ class Coordinator:
                 ))
 
                 self._iteration += 1
+                self.run_state.current_iteration = self._iteration
+                self.run_state.dimensions_explored.append(plan.dimension_name)
 
             if not next_active:
                 break  # all branches exhausted
             active_baselines = next_active
+
+        self.run_state.end_time = time.time()
+        self.run_state.total_experiments_run = self.budget.experiments_run
+        self.run_state.total_cost_usd = self.budget.spent_usd
 
         self.logger.log(Event(
             event="run_completed",
