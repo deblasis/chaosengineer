@@ -17,6 +17,17 @@ class BudgetTracker:
         self.experiments_run: int = 0
         self.consecutive_no_improvement: int = 0
         self._start_time: float | None = None
+        self._elapsed_offset: float = 0.0
+
+    @classmethod
+    def from_snapshot(cls, config: BudgetConfig, experiments_run: int, cost_spent: float,
+                      elapsed_offset: float, consecutive_no_improvement: int) -> "BudgetTracker":
+        tracker = cls(config)
+        tracker.experiments_run = experiments_run
+        tracker.spent_usd = cost_spent
+        tracker._elapsed_offset = elapsed_offset
+        tracker.consecutive_no_improvement = consecutive_no_improvement
+        return tracker
 
     def start(self) -> None:
         self._start_time = time.monotonic()
@@ -48,8 +59,8 @@ class BudgetTracker:
     @property
     def elapsed_seconds(self) -> float:
         if self._start_time is None:
-            return 0.0
-        return time.monotonic() - self._start_time
+            return self._elapsed_offset
+        return (time.monotonic() - self._start_time) + self._elapsed_offset
 
     @property
     def remaining_time(self) -> float | None:
@@ -76,6 +87,20 @@ class BudgetTracker:
         ):
             return True
         return False
+
+    @property
+    def exhaustion_reason(self) -> str | None:
+        if self.config.max_experiments is not None and self.experiments_run >= self.config.max_experiments:
+            return "budget_exhausted"
+        if self.config.max_api_cost is not None and self.spent_usd >= self.config.max_api_cost:
+            return "budget_exhausted"
+        if self.config.max_wall_time_seconds is not None and self._start_time is not None:
+            if self.elapsed_seconds >= self.config.max_wall_time_seconds:
+                return "time_exhausted"
+        if self.config.max_plateau_iterations is not None:
+            if self.consecutive_no_improvement >= self.config.max_plateau_iterations:
+                return "plateau"
+        return None
 
     def snapshot(self) -> dict[str, Any]:
         return {

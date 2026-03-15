@@ -82,3 +82,57 @@ class TestBudgetTracker:
         assert snap["remaining_cost"] == 45.0
         assert snap["experiments_run"] == 1
         assert snap["remaining_experiments"] == 99
+
+
+class TestBudgetFromSnapshot:
+    def test_from_snapshot_restores_state(self):
+        config = BudgetConfig(max_experiments=20, max_api_cost=10.0)
+        tracker = BudgetTracker.from_snapshot(config=config, experiments_run=5, cost_spent=3.50,
+                                              elapsed_offset=120.0, consecutive_no_improvement=2)
+        assert tracker.experiments_run == 5
+        assert tracker.spent_usd == 3.50
+        assert tracker.consecutive_no_improvement == 2
+        assert tracker.remaining_experiments == 15
+        assert tracker.remaining_cost == 6.50
+
+    def test_elapsed_offset_added_to_elapsed_seconds(self):
+        config = BudgetConfig(max_wall_time_seconds=300)
+        tracker = BudgetTracker.from_snapshot(config=config, experiments_run=0, cost_spent=0.0,
+                                              elapsed_offset=100.0, consecutive_no_improvement=0)
+        tracker.start()
+        assert tracker.elapsed_seconds >= 100.0
+        assert tracker.remaining_time <= 200.0
+
+    def test_exhausted_with_offset(self):
+        config = BudgetConfig(max_wall_time_seconds=100)
+        tracker = BudgetTracker.from_snapshot(config=config, experiments_run=0, cost_spent=0.0,
+                                              elapsed_offset=100.0, consecutive_no_improvement=0)
+        tracker.start()
+        assert tracker.is_exhausted()
+
+
+class TestExhaustionReason:
+    def test_experiment_exhaustion(self):
+        config = BudgetConfig(max_experiments=5)
+        tracker = BudgetTracker(config)
+        for _ in range(5):
+            tracker.record_experiment()
+        assert tracker.exhaustion_reason == "budget_exhausted"
+
+    def test_cost_exhaustion(self):
+        config = BudgetConfig(max_api_cost=10.0)
+        tracker = BudgetTracker(config)
+        tracker.add_cost(10.0)
+        assert tracker.exhaustion_reason == "budget_exhausted"
+
+    def test_plateau_exhaustion(self):
+        config = BudgetConfig(max_plateau_iterations=3)
+        tracker = BudgetTracker(config)
+        for _ in range(3):
+            tracker.record_no_improvement()
+        assert tracker.exhaustion_reason == "plateau"
+
+    def test_not_exhausted(self):
+        config = BudgetConfig(max_experiments=10)
+        tracker = BudgetTracker(config)
+        assert tracker.exhaustion_reason is None
