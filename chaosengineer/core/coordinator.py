@@ -20,8 +20,7 @@ from chaosengineer.core.state import (
 )
 from chaosengineer.core.budget import BudgetTracker
 from chaosengineer.metrics.logger import EventLogger, Event
-from chaosengineer.testing.simulator import DecisionMaker, DimensionPlan
-from chaosengineer.testing.executor import ExperimentExecutor
+from chaosengineer.core.interfaces import DecisionMaker, DimensionPlan, ExperimentExecutor
 from chaosengineer.workloads.parser import WorkloadSpec
 
 
