@@ -1,0 +1,4 @@
+"exp-0-0":
+  primary_metric: 0.91
+  secondary_metrics:
+    train_loss: 1.5

@@ -1,0 +1,7 @@
+# Scripted results for the sample autoresearch workload
+"exp-0-0":
+  primary_metric: 0.92
+  secondary_metrics: { train_loss: 1.3, perplexity: 2.5 }
+"exp-0-1":
+  primary_metric: 0.95
+  secondary_metrics: { train_loss: 1.5, perplexity: 2.8 }
