@@ -44,9 +44,9 @@ class TestBatchRunExperiments:
         calls = []
 
         class TrackingExecutor(ScriptedExecutor):
-            def run_experiments(self, tasks):
+            def run_experiments(self, tasks, on_worker_done=None):
                 calls.append(tasks)
-                return super().run_experiments(tasks)
+                return super().run_experiments(tasks, on_worker_done=on_worker_done)
 
         coordinator = Coordinator(
             spec=spec,
@@ -135,11 +135,11 @@ class TestBatchRunExperiments:
                 super().__init__(results)
                 self._coordinator_ref = coordinator_ref
 
-            def run_experiments(self, tasks):
+            def run_experiments(self, tasks, on_worker_done=None):
                 # Capture experiment statuses before execution
                 for exp in self._coordinator_ref.run_state.experiments:
                     pre_batch_statuses.append(exp.status)
-                return super().run_experiments(tasks)
+                return super().run_experiments(tasks, on_worker_done=on_worker_done)
 
         coordinator = Coordinator(
             spec=spec,

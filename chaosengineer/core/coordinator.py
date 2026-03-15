@@ -42,6 +42,8 @@ class Coordinator:
         initial_baseline: Baseline,
         tie_threshold_pct: float = 1.0,
         run_id: str | None = None,
+        pause_controller: "PauseController | None" = None,
+        status_display: "StatusDisplay | None" = None,
     ):
         self.spec = spec
         self.decision_maker = decision_maker
@@ -58,6 +60,8 @@ class Coordinator:
         )
         self._iteration = 0
         self._history: list[dict] = []
+        self._pause_controller = pause_controller
+        self._status_display = status_display
 
     def _log(self, event: Event) -> None:
         """Log an event and append to in-memory history."""
@@ -91,6 +95,9 @@ class Coordinator:
                     event="diverse_discovered",
                     data={"dimension": dim.name, "options": options, "count": len(options)},
                 ))
+            # Pause check during diverse discovery
+            if self._pause_controller and self._pause_controller.pause_requested:
+                return  # Will be caught at top of _run_loop
 
     def run(self) -> None:
         """Execute the coordinator loop until budget or dimensions exhausted."""
@@ -109,6 +116,9 @@ class Coordinator:
         self.budget.start()
         self.run_state.start_time = time.time()
 
+        if self._status_display:
+            self._status_display.on_run_start(self.spec.budget)
+
         self._discover_diverse_dimensions()
 
         active_baselines = [self.best_baseline]
@@ -119,6 +129,15 @@ class Coordinator:
         all_dimensions_exhausted = True
 
         while not self.budget.is_exhausted():
+            # Pause check: before starting new iteration
+            if self._pause_controller and self._pause_controller.pause_requested and self._pause_controller.should_show_menu():
+                choice = self._pause_controller.show_post_iteration_menu()
+                if choice == "pause":
+                    self._log_user_pause(active_baselines)
+                    return
+                else:
+                    self._pause_controller.reset()
+
             next_active: list[Baseline] = []
             for baseline in active_baselines:
                 if self.budget.is_exhausted():
@@ -195,6 +214,28 @@ class Coordinator:
                 self._iteration += 1
                 self.run_state.current_iteration = self._iteration
                 self.run_state.dimensions_explored.append(plan.dimension_name)
+
+                # Status display: iteration done
+                if self._status_display:
+                    self._status_display.on_iteration_done(
+                        self._iteration - 1, self.best_baseline.metric_value,
+                    )
+
+                # Pause check: auto-pause after kill
+                if self._pause_controller and self._pause_controller.kill_issued:
+                    self._log_user_pause(active_baselines)
+                    return
+                # Pause check: after iteration (wait_then_ask or pause_requested)
+                if self._pause_controller and self._pause_controller.should_show_menu():
+                    choice = self._pause_controller.show_post_iteration_menu(
+                        f"Iteration {self._iteration - 1} complete. "
+                        f"{self.spec.primary_metric}={self.best_baseline.metric_value}"
+                    )
+                    if choice == "pause":
+                        self._log_user_pause(active_baselines)
+                        return
+                    else:
+                        self._pause_controller.reset()
 
             if not next_active:
                 break
@@ -347,6 +388,21 @@ class Coordinator:
         )
         active_baselines[:] = self._evaluate_iteration(plan, all_pairs, active_baselines)
 
+    def _log_user_pause(self, active_baselines: list[Baseline]) -> None:
+        """Log run_paused with reason user_requested."""
+        self.run_state.end_time = time.time()
+        self.run_state.total_experiments_run = self.budget.experiments_run
+        self.run_state.total_cost_usd = self.budget.spent_usd
+        self._log(Event(
+            event="run_paused",
+            data={
+                "reason": "user_requested",
+                "last_iteration": self._iteration,
+                "budget_state": self.budget.snapshot(),
+                "active_baselines": [b.to_dict() for b in active_baselines],
+            },
+        ))
+
     def _run_iteration(
         self, plan: DimensionPlan, baseline: Baseline
     ) -> list[tuple[Experiment, ExperimentResult]]:
@@ -376,8 +432,29 @@ class Coordinator:
             ))
             experiment_workers.append((exp, worker))
 
+        # Build callback for status display and pause
+        callback = None
+        if self._status_display or self._pause_controller:
+            def _on_worker_done(task, result, completed, total):
+                if self._status_display:
+                    self._status_display.on_worker_done(task, result, completed, total)
+                if (self._pause_controller
+                        and self._pause_controller.pause_requested
+                        and not self._pause_controller.kill_issued
+                        and completed < total):
+                    choice = self._pause_controller.show_mid_iteration_menu(completed, total)
+                    if choice == "kill":
+                        self._pause_controller.kill_issued = True
+                        self.executor.kill_active()
+                    elif choice == "wait":
+                        self._pause_controller.wait_then_ask = True
+                        self._pause_controller.pause_requested = False
+                    elif choice == "continue":
+                        self._pause_controller.reset()
+            callback = _on_worker_done
+
         # Phase 2: Execute batch
-        batch_results = self.executor.run_experiments(tasks)
+        batch_results = self.executor.run_experiments(tasks, on_worker_done=callback)
 
         # Phase 3: Handle results
         results: list[tuple[Experiment, ExperimentResult]] = []
