@@ -205,7 +205,10 @@ def _parse_baseline_metric(text: str) -> float | None:
     )
     if not match:
         return None
-    return float(match.group(1))
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
 
 
 def parse_workload_spec(
