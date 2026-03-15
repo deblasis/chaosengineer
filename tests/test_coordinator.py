@@ -3,7 +3,7 @@
 import pytest
 from chaosengineer.core.models import (
     BudgetConfig, Baseline, DimensionSpec, DimensionType,
-    ExperimentResult, ExperimentStatus,
+    Experiment, ExperimentResult, ExperimentStatus,
 )
 from chaosengineer.core.coordinator import Coordinator
 from chaosengineer.core.budget import BudgetTracker
@@ -249,6 +249,38 @@ class TestCoordinatorFailedExperiment:
             if e.status == ExperimentStatus.FAILED
         ]
         assert len(failed) == 1
+
+
+class TestCoordinatorRunId:
+    def test_custom_run_id(self, tmp_output_dir):
+        spec = _make_spec()
+        plans = [DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}])]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.91)}
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="abc", metric_value=0.97, metric_name="val_bpb"),
+            run_id="my-custom-run",
+        )
+        assert coordinator.run_state.run_id == "my-custom-run"
+
+    def test_auto_generated_run_id(self, tmp_output_dir):
+        spec = _make_spec()
+        plans = [DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}])]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.91)}
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="abc", metric_value=0.97, metric_name="val_bpb"),
+        )
+        assert coordinator.run_state.run_id != "run-001"
+        assert len(coordinator.run_state.run_id) > 0
 
 
 class TestCoordinatorExceptionLogging:

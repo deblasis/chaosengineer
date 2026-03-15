@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from chaosengineer.core.models import (
     Baseline,
     Experiment,
@@ -36,6 +38,7 @@ class Coordinator:
         budget: BudgetTracker,
         initial_baseline: Baseline,
         tie_threshold_pct: float = 1.0,
+        run_id: str | None = None,
     ):
         self.spec = spec
         self.decision_maker = decision_maker
@@ -45,7 +48,7 @@ class Coordinator:
         self.best_baseline = initial_baseline
         self.tie_threshold_pct = tie_threshold_pct
         self.run_state = Run(
-            run_id="run-001",
+            run_id=run_id or f"run-{uuid.uuid4().hex[:8]}",
             workload_name=spec.name,
             budget=spec.budget,
             baselines=[initial_baseline],
