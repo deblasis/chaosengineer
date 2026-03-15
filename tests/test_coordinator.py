@@ -251,6 +251,44 @@ class TestCoordinatorFailedExperiment:
         assert len(failed) == 1
 
 
+class TestFindTies:
+    def test_ties_with_zero_best_metric(self, tmp_output_dir):
+        spec = _make_spec()
+        plans = [
+            DimensionPlan(
+                dimension_name="lr",
+                values=[{"lr": 0.01}, {"lr": 0.02}, {"lr": 0.03}],
+            ),
+        ]
+        results = {
+            "exp-0-0": ExperimentResult(primary_metric=0.0),
+            "exp-0-1": ExperimentResult(primary_metric=0.005),
+            "exp-0-2": ExperimentResult(primary_metric=0.5),
+        }
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="abc", metric_value=0.97, metric_name="val_bpb"),
+            tie_threshold_pct=1.0,
+        )
+
+        sorted_results = [
+            (Experiment(experiment_id="e0", dimension="lr", params={}, baseline_commit="abc"),
+             ExperimentResult(primary_metric=0.0)),
+            (Experiment(experiment_id="e1", dimension="lr", params={}, baseline_commit="abc"),
+             ExperimentResult(primary_metric=0.005)),
+            (Experiment(experiment_id="e2", dimension="lr", params={}, baseline_commit="abc"),
+             ExperimentResult(primary_metric=0.5)),
+        ]
+
+        tied = coordinator._find_ties(sorted_results, best_metric=0.0)
+        assert len(tied) >= 2
+        assert all(r.primary_metric < 0.1 for _, r in tied)
+
+
 class TestCoordinatorBudgetTrimming:
     def test_budget_trim_logs_warning(self, tmp_output_dir):
         spec = _make_spec(budget=BudgetConfig(max_experiments=3))

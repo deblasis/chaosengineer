@@ -286,6 +286,8 @@ class Coordinator:
             self.budget.record_no_improvement()
             return active_baselines
 
+    _TIE_EPSILON = 0.01  # minimum absolute tie threshold
+
     def _find_ties(
         self,
         sorted_results: list[tuple[Experiment, ExperimentResult]],
@@ -295,7 +297,10 @@ class Coordinator:
         if self.tie_threshold_pct <= 0 or not sorted_results:
             return [sorted_results[0]]
 
-        threshold = abs(best_metric) * (self.tie_threshold_pct / 100.0)
+        threshold = max(
+            abs(best_metric) * (self.tie_threshold_pct / 100.0),
+            self._TIE_EPSILON,
+        )
         tied = []
         for exp, result in sorted_results:
             if abs(result.primary_metric - best_metric) <= threshold:
