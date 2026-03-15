@@ -167,6 +167,37 @@ class TestLastCostUsd:
         assert dm.last_cost_usd == 0.0
 
 
+class TestSetPriorContext:
+    def test_prior_context_stored(self, tmp_path):
+        from unittest.mock import MagicMock
+        from chaosengineer.llm.decision_maker import LLMDecisionMaker
+        from chaosengineer.workloads.parser import WorkloadSpec
+        from chaosengineer.core.models import BudgetConfig
+        harness = MagicMock()
+        spec = WorkloadSpec(name="test", primary_metric="loss", metric_direction="lower",
+                            execution_command="echo", workers_available=1, budget=BudgetConfig(max_experiments=1))
+        dm = LLMDecisionMaker(harness, spec, tmp_path)
+        dm.set_prior_context("Explored: lr, bs. Best: 2.41")
+        assert dm._prior_context == "Explored: lr, bs. Best: 2.41"
+
+    def test_prior_context_prepended_to_prompt(self, tmp_path):
+        harness = FakeHarness([{"done": True}])
+        dm = LLMDecisionMaker(harness, _make_spec(), tmp_path)
+        dm.set_prior_context("Prior state: explored lr. Best: 0.93")
+        dm.pick_next_dimension(_make_dimensions(), _make_baselines(), [])
+
+        user_prompt = harness.calls[0]["user"]
+        assert user_prompt.startswith("Prior state: explored lr. Best: 0.93")
+
+    def test_no_prior_context_prompt_unchanged(self, tmp_path):
+        harness = FakeHarness([{"done": True}])
+        dm = LLMDecisionMaker(harness, _make_spec(), tmp_path)
+        dm.pick_next_dimension(_make_dimensions(), _make_baselines(), [])
+
+        user_prompt = harness.calls[0]["user"]
+        assert user_prompt.startswith("Workload:")
+
+
 class TestFactory:
     def test_claude_code_backend(self, tmp_path):
         dm = create_decision_maker("claude-code", _make_spec(), tmp_path)

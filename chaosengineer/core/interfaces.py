@@ -41,6 +41,10 @@ class DecisionMaker(ABC):
     ) -> list[str]:
         """Discover the saturated set for a diverse dimension."""
 
+    def set_prior_context(self, context: str) -> None:
+        """Provide factual summary of prior run state for resume. Default no-op."""
+        pass
+
 
 @dataclass
 class ExperimentTask:

@@ -48,6 +48,13 @@ class TestScriptedDecisionMaker:
         assert options == ["A", "B", "C"]
 
 
+class TestSetPriorContext:
+    def test_scripted_decision_maker_accepts_prior_context(self):
+        dm = ScriptedDecisionMaker(plans=[])
+        dm.set_prior_context("Prior state: explored lr, bs. Baseline: 2.41")
+        assert dm.pick_next_dimension([], [], []) is None
+
+
 class TestScriptedExecutor:
     def test_returns_scripted_result(self):
         results = {

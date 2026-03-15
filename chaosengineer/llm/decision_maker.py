@@ -48,6 +48,7 @@ class LLMDecisionMaker(DecisionMaker):
         self.spec = spec
         self.work_dir = work_dir
         self._call_count = 0
+        self._prior_context: str | None = None
 
     @property
     def last_cost_usd(self) -> float:
@@ -92,6 +93,9 @@ class LLMDecisionMaker(DecisionMaker):
             raise ValueError(f"LLM returned no options for dimension '{dimension_name}'")
         return options
 
+    def set_prior_context(self, context: str) -> None:
+        self._prior_context = context
+
     def _build_pick_prompt(
         self,
         dimensions: list[DimensionSpec],
@@ -99,6 +103,10 @@ class LLMDecisionMaker(DecisionMaker):
         history: list[dict],
     ) -> str:
         parts = []
+
+        if self._prior_context is not None:
+            parts.append(self._prior_context)
+            parts.append("")
 
         parts.append(f"Workload: {self.spec.name}")
         if self.spec.context:
