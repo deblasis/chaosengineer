@@ -44,6 +44,23 @@ def main():
         help="LLM backend for coordinator decisions (default: claude-code)",
     )
     run_parser.add_argument(
+        "--executor",
+        choices=["subagent", "scripted"],
+        default="subagent",
+        help="Executor backend (default: subagent)",
+    )
+    run_parser.add_argument(
+        "--mode",
+        choices=["sequential", "parallel"],
+        default="sequential",
+        help="Execution mode (default: sequential)",
+    )
+    run_parser.add_argument(
+        "--scripted-results",
+        type=Path,
+        help="YAML file or folder with canned results (required for --executor=scripted)",
+    )
+    run_parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path(".chaosengineer/output"),
@@ -79,21 +96,73 @@ def main():
             sys.exit(0 if all_passed else 1)
 
     elif args.command == "run":
-        from chaosengineer.workloads.parser import parse_workload_spec
-        from chaosengineer.llm import create_decision_maker
-
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        spec = parse_workload_spec(args.workload)
-
-        llm_dir = args.output_dir / "llm_decisions"
-        llm_dir.mkdir(parents=True, exist_ok=True)
-
-        dm = create_decision_maker(args.llm_backend, spec, llm_dir)
-        print(f"Created {args.llm_backend} decision maker for workload: {spec.name}")
-        print("(Full coordinator integration is Sub-project C)")
+        _execute_run(args)
 
     else:
         parser.print_help()
+
+
+def _execute_run(args):
+    """Execute a workload run with the specified backends."""
+    import uuid
+    from chaosengineer.workloads.parser import parse_workload_spec
+    from chaosengineer.llm import create_decision_maker
+    from chaosengineer.execution import create_executor
+    from chaosengineer.core.coordinator import Coordinator
+    from chaosengineer.core.budget import BudgetTracker
+    from chaosengineer.metrics.logger import EventLogger
+    from chaosengineer.core.models import Baseline
+
+    if args.executor == "scripted" and args.scripted_results is None:
+        print("Error: --scripted-results is required when using --executor=scripted", file=sys.stderr)
+        sys.exit(1)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    spec = parse_workload_spec(args.workload)
+
+    # Generate a single run_id for both coordinator and executor
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+
+    llm_dir = args.output_dir / "llm_decisions"
+    llm_dir.mkdir(parents=True, exist_ok=True)
+
+    dm = create_decision_maker(args.llm_backend, spec, llm_dir)
+    executor = create_executor(
+        args.executor, spec, args.output_dir, args.mode,
+        scripted_results=args.scripted_results,
+        run_id=run_id,
+    )
+    logger = EventLogger(args.output_dir / "events.jsonl")
+    budget = BudgetTracker(spec.budget)
+
+    # TODO: initial baseline should come from workload spec or be auto-detected
+    initial_baseline = Baseline(
+        commit="HEAD",
+        metric_value=float("inf") if spec.metric_direction == "lower" else float("-inf"),
+        metric_name=spec.primary_metric,
+    )
+
+    coordinator = Coordinator(
+        spec=spec,
+        decision_maker=dm,
+        executor=executor,
+        logger=logger,
+        budget=budget,
+        initial_baseline=initial_baseline,
+        run_id=run_id,
+    )
+
+    print(f"Starting run: {spec.name}")
+    print(f"  LLM backend: {args.llm_backend}")
+    print(f"  Executor: {args.executor} ({args.mode})")
+    print(f"  Output: {args.output_dir}")
+
+    coordinator.run()
+
+    print(f"\nRun complete:")
+    print(f"  Best metric: {coordinator.best_baseline.metric_value}")
+    print(f"  Experiments: {coordinator.budget.experiments_run}")
+    print(f"  Cost: ${coordinator.budget.spent_usd:.2f}")
 
 
 def _print_scenario_result(result):
