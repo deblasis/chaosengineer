@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime, timezone
 
 from chaosengineer.core.models import (
     Baseline,
@@ -55,10 +56,18 @@ class Coordinator:
             baselines=[initial_baseline],
         )
         self._iteration = 0
+        self._history: list[dict] = []
+
+    def _log(self, event: Event) -> None:
+        """Log an event and append to in-memory history."""
+        self.logger.log(event)
+        ts = event.ts or datetime.now(timezone.utc).isoformat()
+        record = {"ts": ts, "event": event.event, **event.data}
+        self._history.append(record)
 
     def run(self) -> None:
         """Execute the coordinator loop until budget or dimensions exhausted."""
-        self.logger.log(Event(
+        self._log(Event(
             event="run_started",
             data={
                 "workload": self.spec.name,
@@ -82,7 +91,7 @@ class Coordinator:
                 plan = self.decision_maker.pick_next_dimension(
                     dimensions=self.spec.dimensions,
                     baselines=[baseline],
-                    history=self.logger.read_events(),
+                    history=self._history,
                 )
                 if plan is None:
                     continue  # this branch has no more dimensions
@@ -104,7 +113,7 @@ class Coordinator:
                         dimension_name=plan.dimension_name,
                         values=plan.values[:remaining],
                     )
-                    self.logger.log(Event(
+                    self._log(Event(
                         event="budget_trim",
                         data={
                             "dimension": plan.dimension_name,
@@ -113,7 +122,7 @@ class Coordinator:
                         },
                     ))
 
-                self.logger.log(Event(
+                self._log(Event(
                     event="iteration_started",
                     data={
                         "dimension": plan.dimension_name,
@@ -130,7 +139,7 @@ class Coordinator:
                 )
                 next_active.extend(branch_baselines)
 
-                self.logger.log(Event(
+                self._log(Event(
                     event="budget_checkpoint",
                     data=self.budget.snapshot(),
                 ))
@@ -147,7 +156,7 @@ class Coordinator:
         self.run_state.total_experiments_run = self.budget.experiments_run
         self.run_state.total_cost_usd = self.budget.spent_usd
 
-        self.logger.log(Event(
+        self._log(Event(
             event="run_completed",
             data={
                 "best_metric": self.best_baseline.metric_value,
@@ -191,13 +200,13 @@ class Coordinator:
                 )
                 if result.error_message:
                     fail_experiment(exp, result)
-                    self.logger.log(Event(
+                    self._log(Event(
                         event="worker_failed",
                         data={"experiment_id": exp_id, "error": result.error_message},
                     ))
                 else:
                     complete_experiment(exp, result)
-                    self.logger.log(Event(
+                    self._log(Event(
                         event="worker_completed",
                         data={
                             "experiment_id": exp_id,
@@ -210,7 +219,7 @@ class Coordinator:
                     primary_metric=0.0, error_message=str(e)
                 )
                 fail_experiment(exp, error_result)
-                self.logger.log(Event(
+                self._log(Event(
                     event="worker_failed",
                     data={"experiment_id": exp_id, "error": str(e)},
                 ))
@@ -264,7 +273,7 @@ class Coordinator:
             self.run_state.baselines.append(new_baseline)
             self.budget.record_improvement()
 
-            self.logger.log(Event(
+            self._log(Event(
                 event="breakthrough",
                 data={
                     "new_best": best_metric,

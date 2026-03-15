@@ -404,3 +404,42 @@ class TestCoordinatorExceptionLogging:
         failed_events = coordinator.logger.read_events(event_type="worker_failed")
         assert len(failed_events) == 1
         assert "exp-0-0" in failed_events[0]["experiment_id"]
+
+
+class TestCoordinatorHistoryEfficiency:
+    def test_history_passed_to_decision_maker_without_full_reread(self, tmp_output_dir):
+        """The coordinator should not re-read the entire log file each iteration."""
+        spec = _make_spec()
+        plans = [
+            DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}]),
+            DimensionPlan(dimension_name="depth", values=[{"depth": 6}]),
+        ]
+        results = {
+            "exp-0-0": ExperimentResult(primary_metric=0.91),
+            "exp-1-0": ExperimentResult(primary_metric=0.89),
+        }
+
+        call_count = 0
+        original_read = EventLogger.read_events
+
+        def counting_read(self_logger, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_read(self_logger, *args, **kwargs)
+
+        logger = EventLogger(tmp_output_dir / "events.jsonl")
+        logger.read_events = lambda *a, **kw: counting_read(logger, *a, **kw)
+
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=logger,
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="abc", metric_value=0.97, metric_name="val_bpb"),
+        )
+
+        coordinator.run()
+
+        # With in-memory history, read_events should not be called during run
+        assert call_count == 0
