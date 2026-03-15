@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,8 @@ class SubagentExecutor(ExperimentExecutor):
         )
         self._task_builder = TaskPacketBuilder()
         self._result_parser = ResultParser()
+        self._active_processes: list[subprocess.Popen] = []
+        self._process_lock = threading.Lock()
 
     def run_experiment(
         self,
@@ -65,26 +68,37 @@ class SubagentExecutor(ExperimentExecutor):
         task = ExperimentTask(experiment_id, params, command, baseline_commit, resource)
         return self._run_single(task)
 
-    def run_experiments(self, tasks: list[ExperimentTask]) -> list[ExperimentResult]:
-        """Run a batch of experiments.
-
-        Postcondition: always returns exactly one ExperimentResult per input task.
-        Failures are captured as ExperimentResult with error_message set, never raised.
-        """
+    def run_experiments(
+        self,
+        tasks: list[ExperimentTask],
+        on_worker_done: "Callable[[ExperimentTask, ExperimentResult, int, int], None] | None" = None,
+    ) -> list[ExperimentResult]:
+        """Run a batch of experiments with as_completed for reactive callbacks."""
         max_workers = len(tasks) if self._mode == "parallel" else 1
 
+        result_map: dict[str, ExperimentResult] = {}
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = [pool.submit(self._run_single, task) for task in tasks]
-            results = []
-            for future, task in zip(futures, tasks):
+            future_to_task = {
+                pool.submit(self._run_single, task): task for task in tasks
+            }
+            completed_count = 0
+            total = len(tasks)
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
                 try:
-                    results.append(future.result())
+                    result = future.result()
                 except Exception as e:
-                    results.append(ExperimentResult(
+                    result = ExperimentResult(
                         primary_metric=0.0,
                         error_message=f"Thread crashed for {task.experiment_id}: {e}",
-                    ))
-        return results
+                    )
+                result_map[task.experiment_id] = result
+                completed_count += 1
+                if on_worker_done is not None:
+                    on_worker_done(task, result, completed_count, total)
+
+        # Reorder to match input task order
+        return [result_map[t.experiment_id] for t in tasks]
 
     def _run_single(self, task: ExperimentTask) -> ExperimentResult:
         """Execute the full pipeline for one experiment."""
@@ -148,11 +162,7 @@ class SubagentExecutor(ExperimentExecutor):
         worktree_path: Path,
         resource: str,
     ) -> subprocess.CompletedProcess | ExperimentResult:
-        """Spawn claude -p subprocess using the task file.
-
-        Returns CompletedProcess on success, or an error ExperimentResult
-        on timeout.
-        """
+        """Spawn claude -p subprocess using Popen for kill support."""
         env = {**os.environ}
         if resource:
             gpu_id = _parse_gpu_id(resource)
@@ -171,17 +181,30 @@ class SubagentExecutor(ExperimentExecutor):
             "--verbose",
         ]
 
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(worktree_path),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        with self._process_lock:
+            self._active_processes.append(proc)
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(worktree_path),
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=proc.returncode,
+                stdout=stdout,
+                stderr=stderr,
             )
-            return result
         except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             return ExperimentResult(
                 primary_metric=0.0,
                 error_message=(
@@ -189,6 +212,20 @@ class SubagentExecutor(ExperimentExecutor):
                     f"(budget: {self._spec.time_budget_seconds}s + {_GRACE_SECONDS}s grace)"
                 ),
             )
+        finally:
+            with self._process_lock:
+                if proc in self._active_processes:
+                    self._active_processes.remove(proc)
+
+    def kill_active(self) -> None:
+        """Terminate all active subprocesses."""
+        with self._process_lock:
+            processes = list(self._active_processes)
+        for proc in processes:
+            try:
+                proc.terminate()
+            except OSError:
+                pass  # Already dead
 
 
 def _parse_gpu_id(resource: str) -> str | None:
