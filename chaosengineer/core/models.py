@@ -97,6 +97,7 @@ class Experiment:
             "worker_id": self.worker_id,
             "result": self.result.to_dict() if self.result else None,
             "branch_id": self.branch_id,
+            "is_stale": self.is_stale,
         }
 
 

@@ -104,6 +104,30 @@ class TestBudgetConfig:
         assert b.max_wall_time_seconds == 28800
 
 
+class TestExperimentSerialization:
+    def test_to_dict_includes_is_stale(self):
+        exp = Experiment(
+            experiment_id="exp-001",
+            dimension="lr",
+            params={"lr": 0.08},
+            baseline_commit="abc",
+            is_stale=True,
+        )
+        d = exp.to_dict()
+        assert "is_stale" in d
+        assert d["is_stale"] is True
+
+    def test_to_dict_is_stale_defaults_false(self):
+        exp = Experiment(
+            experiment_id="exp-001",
+            dimension="lr",
+            params={"lr": 0.08},
+            baseline_commit="abc",
+        )
+        d = exp.to_dict()
+        assert d["is_stale"] is False
+
+
 class TestRun:
     def test_creation(self):
         budget = BudgetConfig(max_experiments=10)
