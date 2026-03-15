@@ -27,6 +27,8 @@ baseline_metric_value: float | None = None
 
 Just the value — the parser doesn't depend on core models.
 
+Parser regex must accept optional negative sign and scientific notation: `[-+]?[\d.]+(?:[eE][-+]?\d+)?`. Case-insensitive match on key name (`Metric value`).
+
 ## Auto-Detection
 
 When no baseline is in the spec and no `--initial-baseline` CLI flag is given, `_execute_run` runs the workload to measure the real baseline:
@@ -39,13 +41,15 @@ When no baseline is in the spec and no `--initial-baseline` CLI flag is given, `
 
 This logic lives in a `detect_baseline(spec) -> float` function in `cli.py` (~15 lines).
 
-If the execution or parse command fails, print an error and exit. No silent fallback to inf.
+Failure means: non-zero exit code from either subprocess, or failure to parse a float from the metric parse command output. On failure, print an error and exit. No silent fallback to inf.
+
+When `--executor=scripted`, auto-detection is not available — either `--initial-baseline` or the workload `## Baseline` section must be provided. If neither is present, print an error and exit.
 
 ## Resolution Order & CLI Override
 
 Priority:
 
-1. `--initial-baseline 2.08` CLI flag (highest)
+1. `--initial-baseline 2.08` CLI flag (highest) — `run_parser.add_argument("--initial-baseline", type=float, default=None, help="Override initial baseline metric value")`
 2. Workload spec `## Baseline` section
 3. Auto-detect by running the workload
 
@@ -73,4 +77,4 @@ The existing `float("inf")` / `float("-inf")` fallback is removed entirely.
 1. **Parser tests** — `baseline_metric_value` parsed from spec markdown, `None` when absent
 2. **Resolution logic tests** — CLI flag wins over spec, spec wins over auto-detect, auto-detect runs when both absent
 3. **`detect_baseline` tests** — mock subprocess calls, verify metric extraction, verify exit on failure
-4. **E2E fix** — update Irish music pipeline workload fixture to include `## Baseline` with `2.08`; test should now produce 6 breakthroughs matching the direct coordinator test
+4. **E2E fix** — add `## Baseline` with `Metric value: 2.08` to the real workload spec `workloads/autoresearch-irish-music.md`. Update `test_run_via_cli_scripted` to assert 6 breakthroughs (not 7). The test's `Args` class needs `initial_baseline = None`.
