@@ -44,7 +44,11 @@ class ExperimentExecutor(ABC):
         ...
 
     def run_experiments(self, tasks: list[ExperimentTask]) -> list[ExperimentResult]:
-        """Run a batch of experiments. Default: sequential."""
+        """Run a batch of experiments. Default: sequential.
+
+        Postcondition: always returns exactly one ExperimentResult per input task.
+        Failures are captured as ExperimentResult with error_message set, never raised.
+        """
         return [
             self.run_experiment(t.experiment_id, t.params, t.command, t.baseline_commit, t.resource)
             for t in tasks
@@ -97,6 +101,21 @@ def create_executor(
 
 When `scripted_results` is a directory, all YAML files in the folder are loaded and merged.
 
+**Scripted results YAML schema** (distinct from scenario YAML — this is just the results mapping):
+
+```yaml
+# Maps experiment_id to result fields
+"exp-0-0":
+  primary_metric: 0.91
+  secondary_metrics: { train_loss: 1.5 }
+"exp-0-1":
+  primary_metric: 0.95
+```
+
+This matches the `results:` section of existing scenario YAML files. The factory parses each entry into an `ExperimentResult`, defaulting missing optional fields.
+
+**Path conventions:** Worktree paths (`.chaosengineer/worktrees/`) are relative to the repo root (where `.git` lives). Experiment output paths (`.chaosengineer/output/<experiment_id>/`) are relative to the `--output-dir` CLI flag, which defaults to `.chaosengineer/output`.
+
 ## Per-Experiment Pipeline
 
 Each experiment (potentially running in a thread) follows this pipeline:
@@ -138,7 +157,7 @@ Each experiment (potentially running in a thread) follows this pipeline:
 
 **Tool permissions:** The subagent gets `Edit,Write,Bash,Read` (broader than ClaudeCodeHarness's `Write`-only) because experiment execution requires modifying code, running shell commands, and reading files — not just writing JSON output.
 
-**Timeout defaults:** `WorkloadSpec.time_budget_seconds` defaults to 300 in the parser. To support long-running experiments with no per-experiment limit, the parser will be updated to treat an absent `Time budget` field as `None` instead of defaulting to 300. When `None`, no subprocess timeout is applied.
+**Timeout defaults:** `WorkloadSpec.time_budget_seconds` currently defaults to `300` (type `float`). To support long-running experiments with no per-experiment limit, the type changes to `float | None` with default `None`. An absent `Time budget` field in the workload markdown means no per-experiment timeout. Existing workload specs that explicitly set `Time budget: 5 minutes` are unaffected. Callers of this field must handle `None` — at minimum the parser test asserting `== 300` needs updating to use a workload fixture that sets the field explicitly.
 
 ## Task Prompt Template
 
