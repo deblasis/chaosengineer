@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from chaosengineer.core.models import (
     Baseline,
+    DimensionType,
     Experiment,
     ExperimentResult,
     ExperimentStatus,
@@ -65,6 +66,32 @@ class Coordinator:
         record = {"ts": ts, "event": event.event, **event.data}
         self._history.append(record)
 
+    def _discover_diverse_dimensions(self) -> None:
+        """Discover options for DIVERSE dimensions before the main loop."""
+        for dim in self.spec.dimensions:
+            if dim.dim_type == DimensionType.DIVERSE and dim.options is None:
+                try:
+                    options = self.decision_maker.discover_diverse_options(
+                        dim.name, self.spec.context,
+                    )
+                except Exception as e:
+                    self._log(Event(
+                        event="diverse_discovery_failed",
+                        data={"dimension": dim.name, "error": str(e)},
+                    ))
+                    continue
+                if not options:
+                    self._log(Event(
+                        event="diverse_discovery_failed",
+                        data={"dimension": dim.name, "error": "empty options returned"},
+                    ))
+                    continue
+                dim.options = options
+                self._log(Event(
+                    event="diverse_discovered",
+                    data={"dimension": dim.name, "options": options, "count": len(options)},
+                ))
+
     def run(self) -> None:
         """Execute the coordinator loop until budget or dimensions exhausted."""
         self._log(Event(
@@ -77,6 +104,8 @@ class Coordinator:
         ))
         self.budget.start()
         self.run_state.start_time = time.time()
+
+        self._discover_diverse_dimensions()
 
         active_baselines = [self.best_baseline]
 

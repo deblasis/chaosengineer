@@ -443,3 +443,202 @@ class TestCoordinatorHistoryEfficiency:
 
         # With in-memory history, read_events should not be called during run
         assert call_count == 0
+
+
+class TestDiverseDimensionDiscovery:
+    """Test _discover_diverse_dimensions integration."""
+
+    def test_discovers_options_for_diverse_dims(self, tmp_output_dir):
+        spec = _make_spec(
+            dimensions=[
+                DimensionSpec(name="optimizer", dim_type=DimensionType.DIVERSE),
+            ],
+            budget=BudgetConfig(max_experiments=1),
+        )
+        plans = [
+            DimensionPlan(dimension_name="optimizer", values=[{"optimizer": "adam"}]),
+        ]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.9)}
+        dm = ScriptedDecisionMaker(
+            plans, diverse_options={"optimizer": ["adam", "sgd", "rmsprop"]},
+        )
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=dm,
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="HEAD", metric_value=1.0, metric_name="val_bpb"),
+        )
+        coordinator.run()
+
+        # Verify options were discovered
+        dim = spec.dimensions[0]
+        assert dim.options == ["adam", "sgd", "rmsprop"]
+
+        # Verify event was logged
+        events = coordinator.logger.read_events(event_type="diverse_discovered")
+        assert len(events) == 1
+        assert events[0]["dimension"] == "optimizer"
+        assert events[0]["options"] == ["adam", "sgd", "rmsprop"]
+
+    def test_skips_non_diverse_dims(self, tmp_output_dir):
+        spec = _make_spec(
+            dimensions=[
+                DimensionSpec(name="lr", dim_type=DimensionType.DIRECTIONAL, current_value=0.04),
+                DimensionSpec(name="act", dim_type=DimensionType.ENUM, options=["relu", "gelu"]),
+            ],
+            budget=BudgetConfig(max_experiments=1),
+        )
+        plans = [
+            DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}]),
+        ]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.9)}
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="HEAD", metric_value=1.0, metric_name="val_bpb"),
+        )
+        coordinator.run()
+
+        # No diverse_discovered events
+        events = coordinator.logger.read_events(event_type="diverse_discovered")
+        assert len(events) == 0
+
+        # Dimensions unchanged
+        assert spec.dimensions[0].options is None  # DIRECTIONAL has no options
+        assert spec.dimensions[1].options == ["relu", "gelu"]  # ENUM kept its options
+
+    def test_skips_diverse_with_existing_options(self, tmp_output_dir):
+        spec = _make_spec(
+            dimensions=[
+                DimensionSpec(
+                    name="optimizer", dim_type=DimensionType.DIVERSE,
+                    options=["adam", "sgd"],  # already populated
+                ),
+            ],
+            budget=BudgetConfig(max_experiments=1),
+        )
+        plans = [
+            DimensionPlan(dimension_name="optimizer", values=[{"optimizer": "adam"}]),
+        ]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.9)}
+        dm = ScriptedDecisionMaker(
+            plans, diverse_options={"optimizer": ["adam", "sgd", "rmsprop", "adagrad"]},
+        )
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=dm,
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="HEAD", metric_value=1.0, metric_name="val_bpb"),
+        )
+        coordinator.run()
+
+        # Options should NOT have been overwritten
+        assert spec.dimensions[0].options == ["adam", "sgd"]
+        events = coordinator.logger.read_events(event_type="diverse_discovered")
+        assert len(events) == 0
+
+    def test_noop_when_no_diverse_dims(self, tmp_output_dir):
+        spec = _make_spec(
+            dimensions=[
+                DimensionSpec(name="lr", dim_type=DimensionType.DIRECTIONAL, current_value=0.04),
+            ],
+            budget=BudgetConfig(max_experiments=1),
+        )
+        plans = [
+            DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}]),
+        ]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.9)}
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="HEAD", metric_value=1.0, metric_name="val_bpb"),
+        )
+        coordinator.run()
+
+        events = coordinator.logger.read_events(event_type="diverse_discovered")
+        assert len(events) == 0
+        events = coordinator.logger.read_events(event_type="diverse_discovery_failed")
+        assert len(events) == 0
+
+    def test_logs_failure_on_empty_options(self, tmp_output_dir):
+        spec = _make_spec(
+            dimensions=[
+                DimensionSpec(name="optimizer", dim_type=DimensionType.DIVERSE),
+            ],
+            budget=BudgetConfig(max_experiments=1),
+        )
+        plans = [
+            DimensionPlan(dimension_name="optimizer", values=[{"optimizer": "adam"}]),
+        ]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.9)}
+        # Empty diverse_options for "optimizer" — ScriptedDecisionMaker returns []
+        dm = ScriptedDecisionMaker(plans, diverse_options={})
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=dm,
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="HEAD", metric_value=1.0, metric_name="val_bpb"),
+        )
+        coordinator.run()
+
+        # Options should remain None
+        assert spec.dimensions[0].options is None
+
+        # Failed event logged
+        events = coordinator.logger.read_events(event_type="diverse_discovery_failed")
+        assert len(events) == 1
+        assert events[0]["dimension"] == "optimizer"
+
+    def test_logs_failure_on_exception(self, tmp_output_dir):
+        spec = _make_spec(
+            dimensions=[
+                DimensionSpec(name="optimizer", dim_type=DimensionType.DIVERSE),
+                DimensionSpec(name="strategy", dim_type=DimensionType.DIVERSE),
+            ],
+            budget=BudgetConfig(max_experiments=1),
+        )
+        plans = [
+            DimensionPlan(dimension_name="strategy", values=[{"strategy": "A"}]),
+        ]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.9)}
+
+        class FailingDecisionMaker(ScriptedDecisionMaker):
+            def discover_diverse_options(self, dimension_name, context):
+                if dimension_name == "optimizer":
+                    raise ValueError("LLM returned garbage")
+                return ["A", "B"]
+
+        dm = FailingDecisionMaker(plans)
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=dm,
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="HEAD", metric_value=1.0, metric_name="val_bpb"),
+        )
+        coordinator.run()
+
+        # optimizer failed, strategy succeeded
+        assert spec.dimensions[0].options is None
+        assert spec.dimensions[1].options == ["A", "B"]
+
+        failed = coordinator.logger.read_events(event_type="diverse_discovery_failed")
+        assert len(failed) == 1
+        assert failed[0]["dimension"] == "optimizer"
+
+        discovered = coordinator.logger.read_events(event_type="diverse_discovered")
+        assert len(discovered) == 1
+        assert discovered[0]["dimension"] == "strategy"
