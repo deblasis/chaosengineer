@@ -112,13 +112,17 @@ class Coordinator:
         self._discover_diverse_dimensions()
 
         active_baselines = [self.best_baseline]
+        self._run_loop(active_baselines)
+
+    def _run_loop(self, active_baselines: list[Baseline]) -> None:
+        """Main coordinator loop. Shared by run() and resume_from_snapshot()."""
+        all_dimensions_exhausted = True
 
         while not self.budget.is_exhausted():
-            # For each active baseline (beam search: may be >1 after ties),
-            # ask the decision maker for a plan and run it.
             next_active: list[Baseline] = []
             for baseline in active_baselines:
                 if self.budget.is_exhausted():
+                    all_dimensions_exhausted = False
                     break
 
                 plan = self.decision_maker.pick_next_dimension(
@@ -127,9 +131,9 @@ class Coordinator:
                     history=self._history,
                 )
                 if plan is None:
-                    continue  # this branch has no more dimensions
+                    continue
 
-                # Check if budget can accommodate this iteration
+                # Budget trim (existing logic)
                 if (
                     self.budget.config.max_experiments is not None
                     and self.budget.experiments_run + len(plan.values)
@@ -140,6 +144,7 @@ class Coordinator:
                         - self.budget.experiments_run
                     )
                     if remaining <= 0:
+                        all_dimensions_exhausted = False
                         break
                     original_count = len(plan.values)
                     plan = DimensionPlan(
@@ -192,21 +197,153 @@ class Coordinator:
                 self.run_state.dimensions_explored.append(plan.dimension_name)
 
             if not next_active:
-                break  # all branches exhausted
+                break
             active_baselines = next_active
 
+        # Exit branching: paused vs completed
         self.run_state.end_time = time.time()
         self.run_state.total_experiments_run = self.budget.experiments_run
         self.run_state.total_cost_usd = self.budget.spent_usd
 
+        if all_dimensions_exhausted and not self.budget.is_exhausted():
+            self._log(Event(
+                event="run_completed",
+                data={
+                    "best_metric": self.best_baseline.metric_value,
+                    "total_experiments": self.budget.experiments_run,
+                    "total_cost_usd": self.budget.spent_usd,
+                },
+            ))
+        else:
+            reason = self.budget.exhaustion_reason or "unknown"
+            self._log(Event(
+                event="run_paused",
+                data={
+                    "reason": reason,
+                    "last_iteration": self._iteration,
+                    "budget_state": self.budget.snapshot(),
+                    "active_baselines": [b.to_dict() for b in active_baselines],
+                },
+            ))
+
+    def resume_from_snapshot(self, snapshot: "RunSnapshot", restart_iteration: bool = False) -> None:
+        """Resume a run from a reconstructed snapshot."""
+        from chaosengineer.core.snapshot import RunSnapshot, IncompleteIteration
+
+        # Restore budget tracker with prior state
+        self.budget = BudgetTracker.from_snapshot(
+            config=snapshot.budget_config,
+            experiments_run=snapshot.total_experiments_run,
+            cost_spent=snapshot.total_cost_usd,
+            elapsed_offset=snapshot.elapsed_time,
+            consecutive_no_improvement=snapshot.consecutive_no_improvement,
+        )
+        self.budget.start()
+
+        # Restore baselines and iteration counter
+        active_baselines = list(snapshot.active_baselines)
+        self.best_baseline = active_baselines[0] if active_baselines else self.best_baseline
+        self._iteration = len(snapshot.dimensions_explored)
+        self._history = list(snapshot.history)
+
+        # Restore run_id
+        self.run_state.run_id = snapshot.run_id
+
+        # Restore DIVERSE discovered options
+        for dim in self.spec.dimensions:
+            if dim.name in snapshot.discovered_dimensions:
+                dim.options = snapshot.discovered_dimensions[dim.name]
+
+        # Set prior context on decision maker
+        context_lines = ["Previous run state (resuming):"]
+        for d in snapshot.dimensions_explored:
+            context_lines.append(f"- Explored {d.name}: winner={d.winner}")
+        bl_str = ", ".join(f"{b.metric_value}" for b in active_baselines)
+        context_lines.append(f"- Active baselines: {bl_str}")
+        context_lines.append(f"- Experiments run: {snapshot.total_experiments_run}")
+        context_lines.append(f"- Budget spent: ${snapshot.total_cost_usd:.2f}")
+        self.decision_maker.set_prior_context("\n".join(context_lines))
+
+        # Log run_resumed event
         self._log(Event(
-            event="run_completed",
+            event="run_resumed",
             data={
-                "best_metric": self.best_baseline.metric_value,
-                "total_experiments": self.budget.experiments_run,
-                "total_cost_usd": self.budget.spent_usd,
+                "original_run_id": snapshot.run_id,
+                "restart_iteration": restart_iteration,
+                "snapshot_summary": {
+                    "dimensions_explored": len(snapshot.dimensions_explored),
+                    "experiments_completed": snapshot.total_experiments_run,
+                },
             },
         ))
+
+        # Handle incomplete iteration
+        if snapshot.incomplete_iteration and not restart_iteration:
+            self._complete_partial_iteration(snapshot.incomplete_iteration, active_baselines)
+            self._iteration += 1
+        elif snapshot.incomplete_iteration and restart_iteration:
+            pass  # Dimension returned to pool, LLM will re-pick
+
+        # Enter normal run loop
+        self._run_loop(active_baselines=active_baselines)
+
+    def _complete_partial_iteration(
+        self, incomplete: "IncompleteIteration", active_baselines: list[Baseline]
+    ) -> None:
+        """Run missing workers from an interrupted iteration and evaluate."""
+        from chaosengineer.core.snapshot import IncompleteIteration
+
+        new_results = self.executor.run_experiments(incomplete.missing_tasks)
+
+        baseline_commit = incomplete.missing_tasks[0].baseline_commit if incomplete.missing_tasks else ""
+
+        all_pairs: list[tuple[Experiment, ExperimentResult]] = []
+        for exp_summary in incomplete.completed_experiments:
+            exp = Experiment(
+                experiment_id=exp_summary.experiment_id,
+                dimension=exp_summary.dimension,
+                params=exp_summary.params,
+                baseline_commit=baseline_commit,
+            )
+            result = ExperimentResult(
+                primary_metric=exp_summary.metric if exp_summary.metric is not None else 0.0,
+                cost_usd=exp_summary.cost_usd,
+            )
+            all_pairs.append((exp, result))
+
+        for task, result in zip(incomplete.missing_tasks, new_results):
+            exp = Experiment(
+                experiment_id=task.experiment_id,
+                dimension=incomplete.dimension,
+                params=task.params,
+                baseline_commit=task.baseline_commit,
+            )
+            all_pairs.append((exp, result))
+            self.budget.record_experiment()
+            self.budget.add_cost(result.cost_usd)
+            self._history.append({
+                "experiment_id": task.experiment_id,
+                "dimension": incomplete.dimension,
+                "params": task.params,
+                "metric": result.primary_metric,
+                "status": "completed" if result.error_message is None else "failed",
+            })
+
+        self._log(Event(
+            event="iteration_gap_completed",
+            data={
+                "dimension": incomplete.dimension,
+                "original_completed": len(incomplete.completed_experiments),
+                "gap_filled": len(new_results),
+            },
+        ))
+
+        plan = DimensionPlan(
+            dimension_name=incomplete.dimension,
+            values=[task.params for task in incomplete.missing_tasks]
+                   + [e.params for e in incomplete.completed_experiments],
+        )
+        active_baselines[:] = self._evaluate_iteration(plan, all_pairs, active_baselines)
 
     def _run_iteration(
         self, plan: DimensionPlan, baseline: Baseline

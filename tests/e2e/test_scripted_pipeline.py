@@ -121,9 +121,9 @@ class TestBudgetExhaustion:
         assert coordinator.budget.experiments_run == 2
         assert coordinator.budget.is_exhausted()
 
-        # Verify run_completed event
-        completed = logger.read_events(event_type="run_completed")
-        assert len(completed) == 1
+        # Budget exhausted emits run_paused (not run_completed)
+        paused = logger.read_events(event_type="run_paused")
+        assert len(paused) == 1
 
 
 class TestEventLogCompleteness:

@@ -100,7 +100,7 @@ class TestIrishMusicPipeline:
         event_types = [e["event"] for e in events]
 
         assert event_types[0] == "run_started"
-        assert event_types[-1] == "run_completed"
+        assert event_types[-1] in ("run_completed", "run_paused")
 
         iterations = [e for e in events if e["event"] == "iteration_started"]
         assert len(iterations) == 18
