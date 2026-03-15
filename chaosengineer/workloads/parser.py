@@ -16,7 +16,7 @@ class WorkloadSpec:
     context: str = ""
     dimensions: list[DimensionSpec] = field(default_factory=list)
     execution_command: str = ""
-    time_budget_seconds: float = 300
+    time_budget_seconds: float | None = None
     evaluation_type: str = "automatic"  # "automatic" | "human"
     primary_metric: str = ""
     metric_direction: str = "lower"  # "lower" | "higher"
@@ -107,11 +107,11 @@ def _parse_dimensions(text: str) -> list[DimensionSpec]:
     return dims
 
 
-def _parse_time_budget(text: str) -> float:
-    """Parse time budget, returns seconds."""
+def _parse_time_budget(text: str) -> float | None:
+    """Parse time budget, returns seconds or None if absent."""
     match = re.search(r"Time budget.*?:\s*(\d+)\s*(minutes?|seconds?|hours?)", text, re.IGNORECASE)
     if not match:
-        return 300  # default 5 minutes
+        return None
     value = int(match.group(1))
     unit = match.group(2).lower()
     if unit.startswith("hour"):

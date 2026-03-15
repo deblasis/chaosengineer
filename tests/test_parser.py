@@ -151,6 +151,33 @@ A simple test workload.
         assert "batch-size" in dims
         assert "attention-type" in dims
 
+    def test_absent_time_budget_is_none(self):
+        md = """# Workload: No Budget
+## Experiment Space
+## Execution
+- Command: `echo`
+## Evaluation
+- Metric: score (lower is better)
+## Resources
+- Available: 1
+"""
+        spec = parse_workload_spec(content=md)
+        assert spec.time_budget_seconds is None
+
+    def test_explicit_time_budget_is_parsed(self):
+        md = """# Workload: With Budget
+## Experiment Space
+## Execution
+- Command: `echo`
+- Time budget per experiment: 5 minutes
+## Evaluation
+- Metric: score (lower is better)
+## Resources
+- Available: 1
+"""
+        spec = parse_workload_spec(content=md)
+        assert spec.time_budget_seconds == 300
+
     def test_parse_spaced_dimension_name(self):
         md = """# Workload: Test
 ## Experiment Space
