@@ -249,3 +249,30 @@ class TestCoordinatorFailedExperiment:
             if e.status == ExperimentStatus.FAILED
         ]
         assert len(failed) == 1
+
+
+class TestCoordinatorExceptionLogging:
+    """Test that exceptions during execution are logged as worker_failed events."""
+
+    def test_exception_logs_worker_failed_event(self, tmp_output_dir):
+        """When executor raises an exception (not just returns error_message),
+        the coordinator should still log a worker_failed event."""
+        spec = _make_spec()
+        plans = [
+            DimensionPlan(dimension_name="lr", values=[{"lr": 0.02}]),
+        ]
+        results = {}  # empty — will raise KeyError
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(tmp_output_dir / "events.jsonl"),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline(commit="abc", metric_value=0.97, metric_name="val_bpb"),
+        )
+
+        coordinator.run()
+
+        failed_events = coordinator.logger.read_events(event_type="worker_failed")
+        assert len(failed_events) == 1
+        assert "exp-0-0" in failed_events[0]["experiment_id"]

@@ -190,6 +190,10 @@ class Coordinator:
                     primary_metric=0.0, error_message=str(e)
                 )
                 fail_experiment(exp, error_result)
+                self.logger.log(Event(
+                    event="worker_failed",
+                    data={"experiment_id": exp_id, "error": str(e)},
+                ))
                 result = None
 
             release_worker(worker)
