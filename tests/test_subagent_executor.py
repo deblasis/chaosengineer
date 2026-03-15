@@ -10,6 +10,7 @@ import pytest
 
 from chaosengineer.core.interfaces import ExperimentTask
 from chaosengineer.core.models import ExperimentResult
+from chaosengineer.execution.cli_usage import CliUsage
 from chaosengineer.execution.subagent import SubagentExecutor
 from chaosengineer.execution.worktree import WorktreeManager
 from chaosengineer.workloads.parser import WorkloadSpec
@@ -30,6 +31,14 @@ def _make_spec(**overrides) -> WorkloadSpec:
 def _git_success(*args, **kwargs):
     """Return success for any git worktree command."""
     return subprocess.CompletedProcess(args=[], returncode=0)
+
+
+_RESULT_STDOUT = json.dumps({
+    "type": "result",
+    "subtype": "success",
+    "total_cost_usd": 0.42,
+    "usage": {"input_tokens": 5000, "output_tokens": 200},
+})
 
 
 class TestSubagentRunExperiment:
@@ -136,6 +145,82 @@ class TestSubagentRunExperiment:
 
         # Check that subprocess.run was called with timeout=None
         assert claude_kwargs.get("timeout") is None
+
+    @patch("subprocess.run")
+    def test_successful_experiment_has_cost(self, mock_run, tmp_path):
+        def dispatch(cmd, *args, **kwargs):
+            if cmd[0] == "git":
+                return subprocess.CompletedProcess(args=[], returncode=0)
+            result_dir = tmp_path / "output" / "exp-0-0"
+            result_dir.mkdir(parents=True, exist_ok=True)
+            (result_dir / "result.json").write_text(json.dumps({
+                "primary_metric": 0.91,
+            }))
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout=_RESULT_STDOUT)
+
+        mock_run.side_effect = dispatch
+
+        spec = _make_spec()
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
+
+        result = executor.run_experiment(
+            experiment_id="exp-0-0",
+            params={"lr": 0.02},
+            command="python train.py",
+            baseline_commit="abc123",
+        )
+
+        assert result.cost_usd == 0.42
+        assert result.tokens_in == 5000
+        assert result.tokens_out == 200
+
+    @patch("subprocess.run")
+    def test_failed_experiment_still_has_cost(self, mock_run, tmp_path):
+        def dispatch(cmd, *args, **kwargs):
+            if cmd[0] == "git":
+                return subprocess.CompletedProcess(args=[], returncode=0)
+            return subprocess.CompletedProcess(
+                args=[], returncode=1, stderr="error", stdout=_RESULT_STDOUT,
+            )
+
+        mock_run.side_effect = dispatch
+
+        spec = _make_spec()
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
+
+        result = executor.run_experiment(
+            experiment_id="exp-0-0",
+            params={"lr": 0.02},
+            command="python train.py",
+            baseline_commit="abc123",
+        )
+
+        assert result.error_message is not None
+        assert result.cost_usd == 0.42
+
+    @patch("subprocess.run")
+    def test_missing_result_file_still_has_cost(self, mock_run, tmp_path):
+        """Subagent ran (incurred cost) but failed to write result.json."""
+        def dispatch(cmd, *args, **kwargs):
+            if cmd[0] == "git":
+                return subprocess.CompletedProcess(args=[], returncode=0)
+            # Don't write result.json — subagent failed to produce output
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout=_RESULT_STDOUT)
+
+        mock_run.side_effect = dispatch
+
+        spec = _make_spec()
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
+
+        result = executor.run_experiment(
+            experiment_id="exp-0-0",
+            params={"lr": 0.02},
+            command="python train.py",
+            baseline_commit="abc123",
+        )
+
+        assert result.error_message is not None  # ResultParser returns error
+        assert result.cost_usd == 0.42  # But cost is still tracked
 
 
 class TestSubagentRunExperiments:

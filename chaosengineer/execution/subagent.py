@@ -12,6 +12,7 @@ from typing import Any
 
 from chaosengineer.core.interfaces import ExperimentExecutor, ExperimentTask
 from chaosengineer.core.models import ExperimentResult
+from chaosengineer.execution.cli_usage import parse_cli_usage
 from chaosengineer.execution.result_parser import ResultParser
 from chaosengineer.execution.task_packet import TaskPacketBuilder
 from chaosengineer.execution.worktree import WorktreeManager
@@ -113,7 +114,7 @@ class SubagentExecutor(ExperimentExecutor):
 
             # 4. Check for non-zero exit code
             if invoke_result.returncode != 0:
-                return ExperimentResult(
+                error_result = ExperimentResult(
                     primary_metric=0.0,
                     duration_seconds=duration,
                     error_message=(
@@ -122,11 +123,21 @@ class SubagentExecutor(ExperimentExecutor):
                         f"{(invoke_result.stderr or '')[:500]}"
                     ),
                 )
+                usage = parse_cli_usage(invoke_result.stdout)
+                error_result.tokens_in = usage.tokens_in
+                error_result.tokens_out = usage.tokens_out
+                error_result.cost_usd = usage.cost_usd
+                return error_result
 
             # 5. Parse result
-            return self._result_parser.parse(
+            result = self._result_parser.parse(
                 result_file, task.experiment_id, duration
             )
+            usage = parse_cli_usage(invoke_result.stdout)
+            result.tokens_in = usage.tokens_in
+            result.tokens_out = usage.tokens_out
+            result.cost_usd = usage.cost_usd
+            return result
         finally:
             # 6. Cleanup worktree
             self._worktree_mgr.cleanup(worktree_path)
@@ -156,6 +167,8 @@ class SubagentExecutor(ExperimentExecutor):
         cmd = [
             "claude", "-p", prompt,
             "--allowedTools", "Edit,Write,Bash,Read",
+            "--output-format", "stream-json",
+            "--verbose",
         ]
 
         try:
