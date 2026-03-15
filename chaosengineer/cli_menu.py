@@ -41,7 +41,7 @@ def _select_interactive(prompt: str, options: list[str], default: int) -> int:
     selected = default
     try:
         tty.setraw(fd)
-        _render(prompt, options, selected)
+        _render(prompt, options, selected, first=True)
         while True:
             ch = sys.stdin.read(1)
             if ch == "\r" or ch == "\n":
@@ -52,7 +52,7 @@ def _select_interactive(prompt: str, options: list[str], default: int) -> int:
                     selected = (selected - 1) % len(options)
                 elif seq == "[B":
                     selected = (selected + 1) % len(options)
-                _render(prompt, options, selected)
+                _render(prompt, options, selected, first=False)
             elif ch == "\x03":
                 raise KeyboardInterrupt
     finally:
@@ -62,9 +62,10 @@ def _select_interactive(prompt: str, options: list[str], default: int) -> int:
     return selected
 
 
-def _render(prompt: str, options: list[str], selected: int) -> None:
+def _render(prompt: str, options: list[str], selected: int, first: bool = False) -> None:
     lines = 2 + len(options)
-    sys.stdout.write(f"\r\033[{lines}A\033[J" if selected >= 0 else "")
+    if not first:
+        sys.stdout.write(f"\r\033[{lines}A\033[J")
     sys.stdout.write(f"\n{prompt}\n\n")
     for i, opt in enumerate(options):
         marker = "\033[1m  → \033[0m" if i == selected else "    "

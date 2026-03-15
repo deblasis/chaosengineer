@@ -53,6 +53,17 @@ def _build_parser() -> argparse.ArgumentParser:
     # Resume command
     resume_parser = subparsers.add_parser("resume", help="Resume a partially-completed run")
     resume_parser.add_argument("output_dir", type=str, help="Path to output directory with events.jsonl")
+    resume_parser.add_argument("workload", type=Path, help="Path to workload spec markdown file")
+    resume_parser.add_argument("--llm-backend", choices=["claude-code", "sdk", "scripted"], default="claude-code",
+                               help="LLM backend for coordinator decisions (default: claude-code)")
+    resume_parser.add_argument("--executor", choices=["subagent", "scripted"], default="subagent",
+                               help="Executor backend (default: subagent)")
+    resume_parser.add_argument("--mode", choices=["sequential", "parallel"], default="sequential",
+                               help="Execution mode (default: sequential)")
+    resume_parser.add_argument("--scripted-results", type=Path,
+                               help="YAML file or folder with canned results (required for --executor=scripted)")
+    resume_parser.add_argument("--scripted-plans", type=Path,
+                               help="YAML file with scripted dimension plans (required for --llm-backend=scripted)")
     resume_parser.add_argument("--add-cost", type=float, default=0, help="Add USD to cost budget")
     resume_parser.add_argument("--add-experiments", type=int, default=0, help="Add to experiment budget")
     resume_parser.add_argument("--add-time", type=float, default=0, help="Add seconds to time budget")
@@ -353,16 +364,62 @@ def _execute_resume(args):
         if resp != "y":
             sys.exit(0)
 
-    # For resume, we need a minimal coordinator. Since we don't have the original
-    # CLI args, we use a simplified setup. The workload spec would need to be
-    # re-loaded from the original spec file. For now, this is a placeholder
-    # that shows the structure — full integration requires the workload spec path
-    # to be stored in the event log or output dir.
-    print("Resume infrastructure ready. Full executor wiring requires workload spec path.")
-    print("Use the Python API directly for now:")
-    print(f"  from chaosengineer.core.snapshot import build_snapshot")
-    print(f"  snapshot = build_snapshot(Path('{events_path}'))")
-    print(f"  coordinator.resume_from_snapshot(snapshot)")
+    # Wire up backends (same pattern as _execute_run)
+    from chaosengineer.workloads.parser import parse_workload_spec
+    from chaosengineer.llm import create_decision_maker
+    from chaosengineer.execution import create_executor
+
+    spec = parse_workload_spec(args.workload)
+
+    if args.llm_backend == "scripted":
+        if args.scripted_plans is None:
+            print("Error: --scripted-plans is required when using --llm-backend=scripted", file=sys.stderr)
+            sys.exit(1)
+        from chaosengineer.workloads.plan_loader import load_scripted_plans
+        from chaosengineer.testing.simulator import ScriptedDecisionMaker
+        plans = load_scripted_plans(args.scripted_plans)
+        dm = ScriptedDecisionMaker(plans)
+    else:
+        llm_dir = output_dir / "llm_decisions"
+        llm_dir.mkdir(parents=True, exist_ok=True)
+        dm = create_decision_maker(args.llm_backend, spec, llm_dir)
+
+    if args.executor == "scripted" and args.scripted_results is None:
+        print("Error: --scripted-results is required when using --executor=scripted", file=sys.stderr)
+        sys.exit(1)
+
+    executor = create_executor(
+        args.executor, spec, output_dir, args.mode,
+        scripted_results=getattr(args, "scripted_results", None),
+        run_id=snapshot.run_id,
+    )
+    logger = EventLogger(events_path)
+
+    coordinator = Coordinator(
+        spec=spec,
+        decision_maker=dm,
+        executor=executor,
+        logger=logger,
+        budget=budget_tracker,
+        initial_baseline=snapshot.active_baselines[0] if snapshot.active_baselines else Baseline("HEAD", 0.0, spec.primary_metric),
+        run_id=snapshot.run_id,
+    )
+    extensions = {}
+    if args.add_cost > 0:
+        extensions["add_cost"] = args.add_cost
+    if args.add_experiments > 0:
+        extensions["add_experiments"] = args.add_experiments
+    if args.add_time > 0:
+        extensions["add_time"] = args.add_time
+    coordinator.resume_from_snapshot(
+        snapshot, restart_iteration=args.restart_iteration,
+        budget_extensions=extensions or None,
+    )
+
+    print(f"\nRun complete:")
+    print(f"  Best metric: {coordinator.best_baseline.metric_value}")
+    print(f"  Experiments: {coordinator.budget.experiments_run}")
+    print(f"  Cost: ${coordinator.budget.spent_usd:.2f}")
 
 
 def _print_scenario_result(result):

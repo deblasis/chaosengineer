@@ -180,6 +180,9 @@ def build_snapshot(events_path: Path) -> RunSnapshot:
 
         elif event_type == "budget_checkpoint":
             elapsed_time = entry.get("elapsed_seconds", elapsed_time)
+            consecutive_no_improvement = entry.get(
+                "consecutive_no_improvement", consecutive_no_improvement
+            )
 
         elif event_type == "run_paused":
             stop_reason = StopReason.PAUSED

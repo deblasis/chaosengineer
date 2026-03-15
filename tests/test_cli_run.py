@@ -93,7 +93,7 @@ class TestResumeSubcommand:
 
         parser = _build_parser()
         args = parser.parse_args([
-            "resume", "/tmp/output",
+            "resume", "/tmp/output", "workload.md",
             "--add-cost", "5.0",
             "--add-experiments", "10",
             "--add-time", "3600",
@@ -106,14 +106,14 @@ class TestResumeSubcommand:
         from chaosengineer.cli import _build_parser
 
         parser = _build_parser()
-        args = parser.parse_args(["resume", "/tmp/output", "--restart-iteration"])
+        args = parser.parse_args(["resume", "/tmp/output", "workload.md", "--restart-iteration"])
         assert args.restart_iteration is True
 
     def test_resume_parser_default_flags(self):
         from chaosengineer.cli import _build_parser
 
         parser = _build_parser()
-        args = parser.parse_args(["resume", "/tmp/output"])
+        args = parser.parse_args(["resume", "/tmp/output", "workload.md"])
         assert args.add_cost == 0
         assert args.add_experiments == 0
         assert args.add_time == 0

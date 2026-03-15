@@ -226,7 +226,8 @@ class Coordinator:
                 },
             ))
 
-    def resume_from_snapshot(self, snapshot: "RunSnapshot", restart_iteration: bool = False) -> None:
+    def resume_from_snapshot(self, snapshot: "RunSnapshot", restart_iteration: bool = False,
+                             budget_extensions: dict | None = None) -> None:
         """Resume a run from a reconstructed snapshot."""
         from chaosengineer.core.snapshot import RunSnapshot, IncompleteIteration
 
@@ -269,6 +270,7 @@ class Coordinator:
             event="run_resumed",
             data={
                 "original_run_id": snapshot.run_id,
+                "budget_extensions": budget_extensions or {},
                 "restart_iteration": restart_iteration,
                 "snapshot_summary": {
                     "dimensions_explored": len(snapshot.dimensions_explored),
