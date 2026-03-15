@@ -81,3 +81,83 @@ class TestCliRunArgs:
                 )
                 with patch("chaosengineer.cli._execute_run"):
                     main()
+
+
+import json
+
+
+class TestResumeSubcommand:
+    def test_resume_parser_accepts_budget_extensions(self):
+        """Resume accepts --add-cost, --add-experiments, --add-time flags."""
+        from chaosengineer.cli import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args([
+            "resume", "/tmp/output",
+            "--add-cost", "5.0",
+            "--add-experiments", "10",
+            "--add-time", "3600",
+        ])
+        assert args.add_cost == 5.0
+        assert args.add_experiments == 10
+        assert args.add_time == 3600
+
+    def test_resume_parser_accepts_restart_iteration(self):
+        from chaosengineer.cli import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["resume", "/tmp/output", "--restart-iteration"])
+        assert args.restart_iteration is True
+
+    def test_resume_parser_default_flags(self):
+        from chaosengineer.cli import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["resume", "/tmp/output"])
+        assert args.add_cost == 0
+        assert args.add_experiments == 0
+        assert args.add_time == 0
+        assert args.restart_iteration is False
+
+    def test_force_fresh_flag_on_run(self):
+        from chaosengineer.cli import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["run", "workload.md", "--force-fresh"])
+        assert args.force_fresh is True
+
+
+class TestRunGuard:
+    def test_detects_resumable_session(self, tmp_path):
+        """Run guard detects events.jsonl with no run_completed."""
+        from chaosengineer.cli import _check_resumable_session
+
+        events_path = tmp_path / "events.jsonl"
+        events_path.write_text(json.dumps({
+            "event": "run_started", "run_id": "run-1",
+            "workload": "test", "ts": "2026-01-01T00:00:00Z",
+        }) + "\n")
+
+        result = _check_resumable_session(tmp_path)
+        assert result is not None
+        assert result["run_id"] == "run-1"
+
+    def test_no_guard_for_completed_run(self, tmp_path):
+        """Run guard returns None for a completed run."""
+        from chaosengineer.cli import _check_resumable_session
+
+        events_path = tmp_path / "events.jsonl"
+        events_path.write_text(
+            json.dumps({"event": "run_started", "run_id": "run-1"}) + "\n"
+            + json.dumps({"event": "run_completed", "best_metric": 2.0}) + "\n"
+        )
+
+        result = _check_resumable_session(tmp_path)
+        assert result is None
+
+    def test_no_guard_without_events_file(self, tmp_path):
+        """No events.jsonl means no resumable session."""
+        from chaosengineer.cli import _check_resumable_session
+
+        result = _check_resumable_session(tmp_path)
+        assert result is None

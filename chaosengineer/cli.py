@@ -9,7 +9,7 @@ from pathlib import Path
 from chaosengineer.testing.runner import ScenarioRunner
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chaosengineer",
         description="General-purpose parallel experimentation framework",
@@ -32,55 +32,41 @@ def main():
 
     # Run command: execute a workload
     run_parser = subparsers.add_parser("run", help="Run a workload")
-    run_parser.add_argument(
-        "workload",
-        type=Path,
-        help="Path to workload spec markdown file",
-    )
-    run_parser.add_argument(
-        "--llm-backend",
-        choices=["claude-code", "sdk", "scripted"],
-        default="claude-code",
-        help="LLM backend for coordinator decisions (default: claude-code)",
-    )
-    run_parser.add_argument(
-        "--executor",
-        choices=["subagent", "scripted"],
-        default="subagent",
-        help="Executor backend (default: subagent)",
-    )
-    run_parser.add_argument(
-        "--mode",
-        choices=["sequential", "parallel"],
-        default="sequential",
-        help="Execution mode (default: sequential)",
-    )
-    run_parser.add_argument(
-        "--scripted-results",
-        type=Path,
-        help="YAML file or folder with canned results (required for --executor=scripted)",
-    )
-    run_parser.add_argument(
-        "--scripted-plans",
-        type=Path,
-        help="YAML file with scripted dimension plans (required for --llm-backend=scripted)",
-    )
-    run_parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path(".chaosengineer/output"),
-        help="Directory for run output",
-    )
-    run_parser.add_argument(
-        "--initial-baseline",
-        type=float,
-        default=None,
-        help="Override initial baseline metric value",
-    )
+    run_parser.add_argument("workload", type=Path, help="Path to workload spec markdown file")
+    run_parser.add_argument("--llm-backend", choices=["claude-code", "sdk", "scripted"], default="claude-code",
+                            help="LLM backend for coordinator decisions (default: claude-code)")
+    run_parser.add_argument("--executor", choices=["subagent", "scripted"], default="subagent",
+                            help="Executor backend (default: subagent)")
+    run_parser.add_argument("--mode", choices=["sequential", "parallel"], default="sequential",
+                            help="Execution mode (default: sequential)")
+    run_parser.add_argument("--scripted-results", type=Path,
+                            help="YAML file or folder with canned results (required for --executor=scripted)")
+    run_parser.add_argument("--scripted-plans", type=Path,
+                            help="YAML file with scripted dimension plans (required for --llm-backend=scripted)")
+    run_parser.add_argument("--output-dir", type=Path, default=Path(".chaosengineer/output"),
+                            help="Directory for run output")
+    run_parser.add_argument("--initial-baseline", type=float, default=None,
+                            help="Override initial baseline metric value")
+    run_parser.add_argument("--force-fresh", action="store_true",
+                            help="Skip run guard prompt, start fresh even if resumable session exists")
+
+    # Resume command
+    resume_parser = subparsers.add_parser("resume", help="Resume a partially-completed run")
+    resume_parser.add_argument("output_dir", type=str, help="Path to output directory with events.jsonl")
+    resume_parser.add_argument("--add-cost", type=float, default=0, help="Add USD to cost budget")
+    resume_parser.add_argument("--add-experiments", type=int, default=0, help="Add to experiment budget")
+    resume_parser.add_argument("--add-time", type=float, default=0, help="Add seconds to time budget")
+    resume_parser.add_argument("--restart-iteration", action="store_true",
+                               help="Discard partial iteration, restart from scratch")
 
     # Version
     subparsers.add_parser("version", help="Print version")
 
+    return parser
+
+
+def main():
+    parser = _build_parser()
     args = parser.parse_args()
 
     if args.command == "version":
@@ -108,6 +94,9 @@ def main():
 
     elif args.command == "run":
         _execute_run(args)
+
+    elif args.command == "resume":
+        _execute_resume(args)
 
     else:
         parser.print_help()
@@ -146,8 +135,63 @@ def detect_baseline(spec: "WorkloadSpec") -> float:
     return value
 
 
+def _check_resumable_session(output_dir: Path) -> dict | None:
+    """Check if output_dir has a resumable (non-completed) event log."""
+    import json
+    events_path = output_dir / "events.jsonl"
+    if not events_path.exists():
+        return None
+
+    run_info = None
+    is_completed = False
+    with open(events_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry.get("event") == "run_started":
+                run_info = entry
+            elif entry.get("event") == "run_completed":
+                is_completed = True
+
+    if run_info and not is_completed:
+        return run_info
+    return None
+
+
 def _execute_run(args):
     """Execute a workload run with the specified backends."""
+    # Run guard: check for resumable session
+    if not getattr(args, "force_fresh", False):
+        run_info = _check_resumable_session(args.output_dir)
+        if run_info is not None:
+            from chaosengineer.cli_menu import select
+            from chaosengineer.core.snapshot import build_snapshot
+            snap = build_snapshot(args.output_dir / "events.jsonl")
+            dims = len(snap.dimensions_explored)
+            best = snap.active_baselines[0].metric_value if snap.active_baselines else "?"
+
+            choice = select(
+                f"Found existing run ({dims} dimensions explored, best: {best})",
+                [
+                    "Resume previous run",
+                    "Start fresh (archive existing)",
+                    "Cancel",
+                ],
+            )
+            if choice == 0:  # Resume
+                print(f"\n  chaosengineer resume {args.output_dir}\n")
+                sys.exit(0)
+            elif choice == 1:  # Start fresh
+                import shutil
+                from datetime import datetime
+                bak = args.output_dir.parent / f"{args.output_dir.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                shutil.move(str(args.output_dir), str(bak))
+                print(f"Archived existing run to {bak}")
+            else:  # Cancel
+                sys.exit(0)
+
     import uuid
     from chaosengineer.workloads.parser import parse_workload_spec
     from chaosengineer.llm import create_decision_maker
@@ -230,6 +274,95 @@ def _execute_run(args):
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")
     print(f"  Experiments: {coordinator.budget.experiments_run}")
     print(f"  Cost: ${coordinator.budget.spent_usd:.2f}")
+
+
+def _execute_resume(args):
+    """Execute the resume subcommand."""
+    import json
+    from chaosengineer.core.snapshot import build_snapshot, StopReason
+    from chaosengineer.core.budget import BudgetTracker
+    from chaosengineer.core.models import Baseline, BudgetConfig
+    from chaosengineer.core.coordinator import Coordinator
+    from chaosengineer.metrics.logger import EventLogger
+
+    output_dir = Path(args.output_dir)
+    events_path = output_dir / "events.jsonl"
+
+    if not events_path.exists():
+        print(f"Error: No events.jsonl found in {output_dir}")
+        sys.exit(1)
+
+    snapshot = build_snapshot(events_path)
+
+    if snapshot.stop_reason == StopReason.COMPLETED:
+        print("Run already completed. Nothing to resume.")
+        sys.exit(0)
+
+    # Apply budget extensions
+    bc = snapshot.budget_config
+    if args.add_cost > 0:
+        bc = BudgetConfig(
+            max_api_cost=(bc.max_api_cost or 0) + args.add_cost,
+            max_experiments=bc.max_experiments,
+            max_wall_time_seconds=bc.max_wall_time_seconds,
+            max_plateau_iterations=bc.max_plateau_iterations,
+        )
+    if args.add_experiments > 0:
+        bc = BudgetConfig(
+            max_api_cost=bc.max_api_cost,
+            max_experiments=(bc.max_experiments or 0) + args.add_experiments,
+            max_wall_time_seconds=bc.max_wall_time_seconds,
+            max_plateau_iterations=bc.max_plateau_iterations,
+        )
+    if args.add_time > 0:
+        bc = BudgetConfig(
+            max_api_cost=bc.max_api_cost,
+            max_experiments=bc.max_experiments,
+            max_wall_time_seconds=(bc.max_wall_time_seconds or 0) + args.add_time,
+            max_plateau_iterations=bc.max_plateau_iterations,
+        )
+    snapshot.budget_config = bc
+
+    # Check if budget is still exhausted
+    budget_tracker = BudgetTracker.from_snapshot(
+        config=bc,
+        experiments_run=snapshot.total_experiments_run,
+        cost_spent=snapshot.total_cost_usd,
+        elapsed_offset=snapshot.elapsed_time,
+        consecutive_no_improvement=snapshot.consecutive_no_improvement,
+    )
+    budget_tracker.start()
+    if budget_tracker.is_exhausted():
+        print("Error: Budget is still exhausted after extensions.")
+        print("Use --add-cost, --add-experiments, or --add-time to extend.")
+        sys.exit(1)
+
+    # Print resume summary
+    dims = len(snapshot.dimensions_explored)
+    best = snapshot.active_baselines[0].metric_value if snapshot.active_baselines else "?"
+    print(f"Resuming run {snapshot.run_id} — {dims} dimensions explored, best: {best}, ${snapshot.total_cost_usd:.2f} spent")
+
+    # Crash warning
+    if snapshot.stop_reason == StopReason.CRASHED:
+        print("\nWarning: This run appears to have crashed (no clean stop event).")
+        print("Review the event log before continuing.")
+        try:
+            resp = input("Continue? [y/N] ").strip().lower()
+        except EOFError:
+            resp = ""
+        if resp != "y":
+            sys.exit(0)
+
+    # For resume, we need a minimal coordinator. Since we don't have the original
+    # CLI args, we use a simplified setup. The workload spec would need to be
+    # re-loaded from the original spec file. For now, this is a placeholder
+    # that shows the structure — full integration requires the workload spec path
+    # to be stored in the event log or output dir.
+    print("Resume infrastructure ready. Full executor wiring requires workload spec path.")
+    print("Use the Python API directly for now:")
+    print(f"  from chaosengineer.core.snapshot import build_snapshot")
+    print(f"  snapshot = build_snapshot(Path('{events_path}'))")
+    print(f"  coordinator.resume_from_snapshot(snapshot)")
 
 
 def _print_scenario_result(result):
