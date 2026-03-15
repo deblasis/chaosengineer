@@ -1,7 +1,7 @@
 [project]
-name = "autoresearch"
+name = "chaosengineer"
 version = "0.1.0"
-description = "Autonomous pretraining research swarm"
+description = "General-purpose parallel experimentation framework"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -10,11 +10,15 @@ dependencies = [
     "numpy>=2.2.6",
     "pandas>=2.3.3",
     "pyarrow>=21.0.0",
+    "pyyaml>=6.0",
     "requests>=2.32.0",
     "rustbpe>=0.1.0",
     "tiktoken>=0.11.0",
     "torch==2.9.1",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
 
 [tool.uv.sources]
 torch = [
