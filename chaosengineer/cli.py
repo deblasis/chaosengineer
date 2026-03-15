@@ -188,10 +188,24 @@ def _execute_run(args):
     logger = EventLogger(args.output_dir / "events.jsonl")
     budget = BudgetTracker(spec.budget)
 
-    # TODO: initial baseline should come from workload spec or be auto-detected
+    # Resolve initial baseline: CLI flag > workload spec > auto-detect
+    if args.initial_baseline is not None:
+        metric_value = args.initial_baseline
+    elif spec.baseline_metric_value is not None:
+        metric_value = spec.baseline_metric_value
+    elif args.executor == "scripted":
+        print(
+            "Error: --executor=scripted requires a baseline. "
+            "Use --initial-baseline or add ## Baseline to the workload spec.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    else:
+        metric_value = detect_baseline(spec)
+
     initial_baseline = Baseline(
         commit="HEAD",
-        metric_value=float("inf") if spec.metric_direction == "lower" else float("-inf"),
+        metric_value=metric_value,
         metric_name=spec.primary_metric,
     )
 

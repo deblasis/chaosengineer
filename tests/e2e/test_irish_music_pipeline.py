@@ -138,6 +138,7 @@ class TestIrishMusicPipeline:
             scripted_results = IRISH_MUSIC_DIR / "scripted_results.yaml"
             mode = "sequential"
             output_dir = tmp_path / "output"
+            initial_baseline = 2.08
 
         _execute_run(Args())
 

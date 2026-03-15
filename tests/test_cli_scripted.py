@@ -20,6 +20,7 @@ class FakeArgs:
         self.scripted_plans = plans_path
         self.scripted_results = results_path
         self.output_dir = tmp_path / "output"
+        self.initial_baseline = None
 
 
 class TestScriptedBackend:
@@ -42,6 +43,9 @@ class TestScriptedBackend:
             ## Evaluation
             - Type: automatic
             - Metric: val_bpb (lower is better)
+
+            ## Baseline
+            - Metric value: 1.0
 
             ## Budget
             - Max experiments: 2
@@ -89,6 +93,68 @@ class TestScriptedBackend:
         events = [json.loads(line) for line in events_file.read_text().splitlines()]
         completed = [e for e in events if e["event"] == "worker_completed"]
         assert len(completed) == 1
+
+    def test_cli_baseline_overrides_spec(self, tmp_path):
+        """--initial-baseline flag takes priority over spec baseline."""
+        workload, plans, results = self._write_fixtures(tmp_path)
+        # Add baseline section to workload
+        content = workload.read_text()
+        workload.write_text(content + "\n## Baseline\n- Metric value: 99.0\n")
+
+        args = FakeArgs(tmp_path, plans, results, workload)
+        args.initial_baseline = 5.0  # CLI override
+
+        _execute_run(args)
+
+        events_file = args.output_dir / "events.jsonl"
+        events = [json.loads(line) for line in events_file.read_text().splitlines()]
+        run_started = [e for e in events if e["event"] == "run_started"][0]
+        assert run_started["baseline"]["metric_value"] == 5.0
+
+    def test_spec_baseline_used_when_no_cli_flag(self, tmp_path):
+        """Workload spec baseline used when no --initial-baseline flag."""
+        workload, plans, results = self._write_fixtures(tmp_path)
+        content = workload.read_text()
+        workload.write_text(content + "\n## Baseline\n- Metric value: 3.14\n")
+
+        args = FakeArgs(tmp_path, plans, results, workload)
+        args.initial_baseline = None
+
+        _execute_run(args)
+
+        events_file = args.output_dir / "events.jsonl"
+        events = [json.loads(line) for line in events_file.read_text().splitlines()]
+        run_started = [e for e in events if e["event"] == "run_started"][0]
+        assert run_started["baseline"]["metric_value"] == pytest.approx(3.14)
+
+    def test_scripted_executor_requires_baseline(self, tmp_path):
+        """--executor=scripted without baseline in spec or CLI flag should error."""
+        workload, plans, results = self._write_fixtures(tmp_path)
+        # Overwrite workload without baseline section
+        workload.write_text(dedent("""\
+            # Workload: Test
+
+            ## Context
+            Test workload.
+
+            ## Experiment Space
+            - Directional: "lr" (currently 0.04)
+
+            ## Execution
+            - Command: `echo test`
+
+            ## Evaluation
+            - Type: automatic
+            - Metric: val_bpb (lower is better)
+
+            ## Budget
+            - Max experiments: 2
+        """))
+        args = FakeArgs(tmp_path, plans, results, workload)
+        args.initial_baseline = None
+
+        with pytest.raises(SystemExit):
+            _execute_run(args)
 
 
 class TestDetectBaseline:
