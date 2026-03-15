@@ -371,6 +371,13 @@ def _execute_resume(args):
 
     spec = parse_workload_spec(args.workload)
 
+    # Validate workload spec hash
+    if snapshot.workload_spec_hash and snapshot.workload_spec_hash != spec.spec_hash():
+        print(f"Warning: Workload spec has changed since original run.")
+        print(f"  Original: {snapshot.workload_spec_hash}")
+        print(f"  Current:  {spec.spec_hash()}")
+        print(f"  Results may not be comparable.")
+
     if args.llm_backend == "scripted":
         if args.scripted_plans is None:
             print("Error: --scripted-plans is required when using --llm-backend=scripted", file=sys.stderr)

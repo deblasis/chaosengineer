@@ -299,3 +299,55 @@ class TestBuildSnapshot:
         assert snap.total_cost_usd == 1.1
         assert len(snap.dimensions_explored) == 2
         assert snap.active_baselines[0].metric_value == 2.3
+
+    def test_beam_search_multiple_baselines_via_run_paused(self, tmp_path):
+        """Multiple active baselines from beam search survive snapshot round-trip."""
+        events_path = tmp_path / "events.jsonl"
+        _write_events(events_path, [
+            {"event": "run_started", "run_id": "run-beam", "workload": "test",
+             "workload_spec_hash": "sha256:abc", "budget": {"max_experiments": 10},
+             "mode": "parallel", "baseline": {"commit": "aaa", "metric_value": 3.0, "metric_name": "loss"},
+             "ts": "2026-01-01T00:00:00Z"},
+            {"event": "iteration_started", "iteration": 0, "dimension": "lr",
+             "num_workers": 2, "tasks": [
+                 {"experiment_id": "exp-0-0", "params": {"lr": 0.01}, "command": "echo", "baseline_commit": "aaa"},
+                 {"experiment_id": "exp-0-1", "params": {"lr": 0.1}, "command": "echo", "baseline_commit": "aaa"},
+             ], "ts": "2026-01-01T00:00:01Z"},
+            {"event": "worker_completed", "experiment_id": "exp-0-0", "dimension": "lr",
+             "params": {"lr": 0.01}, "metric": 2.5, "cost_usd": 0.50, "ts": "2026-01-01T00:00:10Z"},
+            {"event": "worker_completed", "experiment_id": "exp-0-1", "dimension": "lr",
+             "params": {"lr": 0.1}, "metric": 2.51, "cost_usd": 0.50, "ts": "2026-01-01T00:00:11Z"},
+            {"event": "breakthrough", "metric": 2.5, "experiment_id": "exp-0-0",
+             "commit": "bbb", "ts": "2026-01-01T00:00:12Z"},
+            {"event": "run_paused", "reason": "budget_exhausted", "last_iteration": 0,
+             "budget_state": {"spent_usd": 1.0, "experiments_run": 2, "elapsed_seconds": 12},
+             "active_baselines": [
+                 {"commit": "bbb", "metric_value": 2.5, "metric_name": "loss"},
+                 {"commit": "ccc", "metric_value": 2.51, "metric_name": "loss"},
+             ],
+             "ts": "2026-01-01T00:00:13Z"},
+        ])
+
+        snap = build_snapshot(events_path)
+        assert snap.stop_reason == StopReason.PAUSED
+        assert len(snap.active_baselines) == 2
+        assert snap.active_baselines[0].metric_value == 2.5
+        assert snap.active_baselines[1].metric_value == 2.51
+        assert snap.active_baselines[0].commit == "bbb"
+        assert snap.active_baselines[1].commit == "ccc"
+
+    def test_workload_spec_hash_stored(self, tmp_path):
+        """Workload spec hash from run_started is stored in snapshot."""
+        events_path = tmp_path / "events.jsonl"
+        _write_events(events_path, [
+            {"event": "run_started", "run_id": "run-hash", "workload": "test",
+             "workload_spec_hash": "sha256:deadbeef1234",
+             "budget": {"max_experiments": 10}, "mode": "parallel",
+             "baseline": {"commit": "aaa", "metric_value": 3.0, "metric_name": "loss"},
+             "ts": "2026-01-01T00:00:00Z"},
+            {"event": "run_completed", "best_metric": 3.0, "total_experiments": 0,
+             "total_cost_usd": 0.0, "ts": "2026-01-01T00:00:01Z"},
+        ])
+
+        snap = build_snapshot(events_path)
+        assert snap.workload_spec_hash == "sha256:deadbeef1234"

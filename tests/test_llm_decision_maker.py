@@ -198,6 +198,58 @@ class TestSetPriorContext:
         assert user_prompt.startswith("Workload:")
 
 
+class TestDecisionLoggerWiring:
+    def test_dimension_selected_logged(self, tmp_path):
+        """DecisionLogger.log_dimension_selected called after pick_next_dimension."""
+        from chaosengineer.core.decision_log import DecisionLogger
+        import json
+
+        harness = FakeHarness([
+            {"dimension_name": "learning_rate", "values": [{"learning_rate": 0.02}]}
+        ])
+        logger = DecisionLogger(tmp_path)
+        dm = LLMDecisionMaker(harness, _make_spec(), tmp_path, decision_logger=logger)
+        dm.pick_next_dimension(_make_dimensions(), _make_baselines(), [])
+
+        entries = []
+        with open(tmp_path / "decisions.jsonl") as f:
+            for line in f:
+                entries.append(json.loads(line))
+        assert len(entries) == 1
+        assert entries[0]["type"] == "dimension_selected"
+        assert entries[0]["dimension"] == "learning_rate"
+        assert "activation" in entries[0]["alternatives"]
+
+    def test_diverse_options_logged(self, tmp_path):
+        """DecisionLogger.log_diverse_options called after discover_diverse_options."""
+        from chaosengineer.core.decision_log import DecisionLogger
+        import json
+
+        harness = FakeHarness([
+            {"options": ["chain-of-thought", "few-shot"], "saturated": True}
+        ])
+        logger = DecisionLogger(tmp_path)
+        dm = LLMDecisionMaker(harness, _make_spec(), tmp_path, decision_logger=logger)
+        dm.discover_diverse_options("prompt_strategy", "LLM eval")
+
+        entries = []
+        with open(tmp_path / "decisions.jsonl") as f:
+            for line in f:
+                entries.append(json.loads(line))
+        assert len(entries) == 1
+        assert entries[0]["type"] == "diverse_options_generated"
+        assert entries[0]["options"] == ["chain-of-thought", "few-shot"]
+
+    def test_no_logger_no_error(self, tmp_path):
+        """No decision logger still works (default None)."""
+        harness = FakeHarness([
+            {"dimension_name": "learning_rate", "values": [{"learning_rate": 0.02}]}
+        ])
+        dm = LLMDecisionMaker(harness, _make_spec(), tmp_path)
+        plan = dm.pick_next_dimension(_make_dimensions(), _make_baselines(), [])
+        assert plan is not None
+
+
 class TestFactory:
     def test_claude_code_backend(self, tmp_path):
         dm = create_decision_maker("claude-code", _make_spec(), tmp_path)

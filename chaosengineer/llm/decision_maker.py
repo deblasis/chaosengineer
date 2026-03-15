@@ -43,12 +43,14 @@ class LLMDecisionMaker(DecisionMaker):
     Delegates LLM transport to an LLMHarness.
     """
 
-    def __init__(self, harness: LLMHarness, spec: WorkloadSpec, work_dir: Path):
+    def __init__(self, harness: LLMHarness, spec: WorkloadSpec, work_dir: Path,
+                 decision_logger: "DecisionLogger | None" = None):
         self.harness = harness
         self.spec = spec
         self.work_dir = work_dir
         self._call_count = 0
         self._prior_context: str | None = None
+        self._decision_logger = decision_logger
 
     @property
     def last_cost_usd(self) -> float:
@@ -73,7 +75,17 @@ class LLMDecisionMaker(DecisionMaker):
         if response.get("done"):
             return None
 
-        return self._validate_pick_response(response, dimensions)
+        plan = self._validate_pick_response(response, dimensions)
+
+        if self._decision_logger:
+            alternatives = [d.name for d in dimensions if d.name != plan.dimension_name]
+            self._decision_logger.log_dimension_selected(
+                dimension=plan.dimension_name,
+                reasoning="",
+                alternatives=alternatives,
+            )
+
+        return plan
 
     def discover_diverse_options(
         self, dimension_name: str, context: str
@@ -91,6 +103,14 @@ class LLMDecisionMaker(DecisionMaker):
         options = response.get("options", [])
         if not options:
             raise ValueError(f"LLM returned no options for dimension '{dimension_name}'")
+
+        if self._decision_logger:
+            self._decision_logger.log_diverse_options(
+                dimension=dimension_name,
+                reasoning="",
+                options=options,
+            )
+
         return options
 
     def set_prior_context(self, context: str) -> None:
