@@ -8,7 +8,8 @@ from chaosengineer.core.models import (
 from chaosengineer.core.coordinator import Coordinator
 from chaosengineer.core.budget import BudgetTracker
 from chaosengineer.metrics.logger import EventLogger
-from chaosengineer.testing.simulator import ScriptedDecisionMaker, DimensionPlan
+from chaosengineer.core.interfaces import DimensionPlan
+from chaosengineer.testing.simulator import ScriptedDecisionMaker
 from chaosengineer.testing.executor import ScriptedExecutor
 from chaosengineer.workloads.parser import WorkloadSpec
 

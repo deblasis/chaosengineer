@@ -13,7 +13,8 @@ from chaosengineer.core.coordinator import Coordinator
 from chaosengineer.core.models import Baseline, BudgetConfig, ExperimentResult
 from chaosengineer.metrics.logger import EventLogger
 from chaosengineer.testing.executor import ScriptedExecutor
-from chaosengineer.testing.simulator import DimensionPlan, ScriptedDecisionMaker
+from chaosengineer.core.interfaces import DimensionPlan
+from chaosengineer.testing.simulator import ScriptedDecisionMaker
 from chaosengineer.workloads.parser import WorkloadSpec
 
 

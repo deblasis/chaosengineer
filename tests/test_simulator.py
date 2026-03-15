@@ -2,15 +2,13 @@
 
 import pytest
 from chaosengineer.core.models import DimensionType, DimensionSpec, ExperimentResult
-from chaosengineer.testing.simulator import (
+from chaosengineer.core.interfaces import (
     DecisionMaker,
-    ScriptedDecisionMaker,
     DimensionPlan,
-)
-from chaosengineer.testing.executor import (
     ExperimentExecutor,
-    ScriptedExecutor,
 )
+from chaosengineer.testing.simulator import ScriptedDecisionMaker
+from chaosengineer.testing.executor import ScriptedExecutor
 
 
 class TestScriptedDecisionMaker:
