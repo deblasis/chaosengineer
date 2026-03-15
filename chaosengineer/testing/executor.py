@@ -1,30 +1,11 @@
-"""Experiment executor interface and scripted implementation for testing."""
+"""Scripted experiment executor for testing."""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Any
 
+from chaosengineer.core.interfaces import ExperimentExecutor
 from chaosengineer.core.models import ExperimentResult
-
-
-class ExperimentExecutor(ABC):
-    """Interface for running experiments.
-
-    In real mode, this runs commands in worktrees. In test mode, returns
-    scripted results instantly.
-    """
-
-    @abstractmethod
-    def run_experiment(
-        self,
-        experiment_id: str,
-        params: dict[str, Any],
-        command: str,
-        baseline_commit: str,
-        resource: str = "",
-    ) -> ExperimentResult:
-        """Run an experiment and return its result."""
 
 
 class ScriptedExecutor(ExperimentExecutor):
