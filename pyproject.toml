@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 
+[project.scripts]
+chaosengineer = "chaosengineer.cli:main"
+
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cu128" },
