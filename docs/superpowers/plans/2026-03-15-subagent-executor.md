@@ -961,7 +961,7 @@ class TestSubagentRunExperiment:
         mock_sub_run.side_effect = write_result
 
         spec = _make_spec()
-        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
 
         result = executor.run_experiment(
             experiment_id="exp-0-0",
@@ -984,7 +984,7 @@ class TestSubagentRunExperiment:
         )
 
         spec = _make_spec()
-        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
 
         result = executor.run_experiment(
             experiment_id="exp-0-0",
@@ -1003,7 +1003,7 @@ class TestSubagentRunExperiment:
         mock_sub_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=360)
 
         spec = _make_spec(time_budget_seconds=300)
-        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
 
         result = executor.run_experiment(
             experiment_id="exp-0-0",
@@ -1022,7 +1022,7 @@ class TestSubagentRunExperiment:
         mock_sub_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
         spec = _make_spec(time_budget_seconds=None)
-        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
 
         executor.run_experiment(
             experiment_id="exp-0-0",
@@ -1060,7 +1060,7 @@ class TestSubagentRunExperiments:
         mock_sub_run.side_effect = write_result
 
         spec = _make_spec()
-        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
 
         tasks = [
             ExperimentTask("exp-0-0", {"lr": 0.02}, "echo", "abc"),
@@ -1092,7 +1092,7 @@ class TestSubagentRunExperiments:
         mock_sub_run.side_effect = write_result
 
         spec = _make_spec()
-        executor = SubagentExecutor(spec, tmp_path / "output", "parallel", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "parallel", run_id="run-test", repo_root=tmp_path)
 
         tasks = [
             ExperimentTask("exp-0-0", {"lr": 0.02}, "echo", "abc"),
@@ -1109,7 +1109,7 @@ class TestSubagentRunExperiments:
         mock_sub_run.side_effect = RuntimeError("unexpected crash")
 
         spec = _make_spec()
-        executor = SubagentExecutor(spec, tmp_path / "output", "parallel", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "parallel", run_id="run-test", repo_root=tmp_path)
 
         tasks = [ExperimentTask("exp-0-0", {"lr": 0.02}, "echo", "abc")]
         results = executor.run_experiments(tasks)
@@ -1126,7 +1126,7 @@ class TestSubagentResourceHandling:
         mock_sub_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
         spec = _make_spec()
-        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test")
+        executor = SubagentExecutor(spec, tmp_path / "output", "sequential", run_id="run-test", repo_root=tmp_path)
 
         executor.run_experiment(
             experiment_id="exp-0-0",
@@ -1192,12 +1192,15 @@ class SubagentExecutor(ExperimentExecutor):
         output_dir: Path,
         mode: str = "sequential",
         run_id: str = "run-unknown",
+        repo_root: Path | None = None,
     ):
         self._spec = spec
         self._output_dir = output_dir
         self._mode = mode
         self._run_id = run_id
-        self._worktree_mgr = WorktreeManager(repo_root=_get_repo_root())
+        self._worktree_mgr = WorktreeManager(
+            repo_root=repo_root if repo_root is not None else _get_repo_root()
+        )
         self._task_builder = TaskPacketBuilder()
         self._result_parser = ResultParser()
 
@@ -1718,7 +1721,7 @@ Replace the `_run_iteration` method (lines 168-234) with the batch version:
 ```python
     def _run_iteration(
         self, plan: DimensionPlan, baseline: Baseline
-    ) -> list[tuple[Experiment, ExperimentResult | None]]:
+    ) -> list[tuple[Experiment, ExperimentResult]]:
         """Run all experiments for one dimension sweep from a given baseline."""
         # Phase 1: Build Experiment objects and task list
         tasks: list[ExperimentTask] = []
@@ -1749,7 +1752,7 @@ Replace the `_run_iteration` method (lines 168-234) with the batch version:
         batch_results = self.executor.run_experiments(tasks)
 
         # Phase 3: Handle results
-        results: list[tuple[Experiment, ExperimentResult | None]] = []
+        results: list[tuple[Experiment, ExperimentResult]] = []
         for (exp, worker), result in zip(experiment_workers, batch_results):
             if result.error_message:
                 fail_experiment(exp, result)
@@ -2311,7 +2314,7 @@ class TestAutoresearchScenario:
     """The original autoresearch workload run e2e with scripted results."""
 
     def test_autoresearch_workload(self, tmp_path):
-        sample_workload = Path(__file__).parents[2] / "tests" / "fixtures" / "sample_workload.md"
+        sample_workload = Path(__file__).parents[1] / "fixtures" / "sample_workload.md"
         spec = parse_workload_spec(sample_workload)
         plans = [
             DimensionPlan(
