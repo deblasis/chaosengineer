@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from chaosengineer.metrics.logger import EventLogger, Event
+from chaosengineer.metrics.summary import generate_summary, summary_to_text
 
 
 class TestEventLogger:
@@ -64,3 +65,35 @@ class TestEventLogger:
         # Should be parseable as ISO format
         from datetime import datetime
         datetime.fromisoformat(ts)
+
+
+class TestRunSummary:
+    def test_summary_from_events(self, tmp_output_dir):
+        logger = EventLogger(tmp_output_dir / "events.jsonl")
+        logger.log(Event(event="run_started", data={"workload": "test", "budget": {}}))
+        logger.log(Event(event="worker_completed", data={
+            "experiment_id": "exp-0-0",
+            "result": {"primary_metric": 0.93, "cost_usd": 0.02},
+        }))
+        logger.log(Event(event="breakthrough", data={
+            "new_best": 0.93, "previous_best": 0.97,
+        }))
+        logger.log(Event(event="run_completed", data={
+            "best_metric": 0.93, "total_experiments": 1, "total_cost_usd": 0.02,
+        }))
+
+        summary = generate_summary(logger)
+        assert summary["best_metric"] == 0.93
+        assert summary["total_experiments"] == 1
+        assert summary["breakthroughs"] == 1
+
+    def test_summary_as_text(self, tmp_output_dir):
+        logger = EventLogger(tmp_output_dir / "events.jsonl")
+        logger.log(Event(event="run_completed", data={
+            "best_metric": 0.93, "total_experiments": 5, "total_cost_usd": 1.50,
+        }))
+
+        summary = generate_summary(logger)
+        text = summary_to_text(summary)
+        assert "0.93" in text
+        assert "5" in text
