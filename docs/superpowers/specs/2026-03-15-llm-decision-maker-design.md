@@ -134,8 +134,7 @@ chaosengineer/llm/
 
 tests/
     test_llm_decision_maker.py   # prompt construction, response parsing/validation
-    test_harness_claude_code.py  # subprocess mocking, file reading
-    test_harness_sdk.py          # API call mocking, cost tracking
+    test_harness.py              # extract_json, ClaudeCodeHarness, SDKHarness tests
 ```
 
 ## Testing Strategy
