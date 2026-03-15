@@ -10,7 +10,6 @@ import pytest
 
 from chaosengineer.core.interfaces import ExperimentTask
 from chaosengineer.core.models import ExperimentResult
-from chaosengineer.execution.cli_usage import CliUsage
 from chaosengineer.execution.subagent import SubagentExecutor
 from chaosengineer.execution.worktree import WorktreeManager
 from chaosengineer.workloads.parser import WorkloadSpec
