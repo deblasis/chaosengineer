@@ -30,6 +30,9 @@ models that see the data many times within the budget.
 - Parse: `grep "^val_bpb:" run.log | awk '{print $2}'`
 - Secondary metrics: peak_vram_mb, num_steps
 
+## Baseline
+- Metric value: 2.08
+
 ## Resources
 - Per worker: 1 GPU
 - Available: 1

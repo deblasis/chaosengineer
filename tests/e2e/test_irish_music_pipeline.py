@@ -122,11 +122,8 @@ class TestIrishMusicPipeline:
     def test_run_via_cli_scripted(self, tmp_path):
         """Verify the full CLI path works for scripted runs.
 
-        Note: _execute_run uses float("inf") as baseline (not 2.08), so
-        experiment 1 (metric 2.15) becomes a breakthrough here. This gives
-        7 breakthroughs vs 6 in the direct coordinator tests above. This is
-        expected — the initial baseline TODO in _execute_run is a known gap.
-        This test only validates the wiring, not the exact breakthrough count.
+        The workload spec includes a baseline of 2.08, so the CLI path
+        now produces the same 6 breakthroughs as the direct coordinator tests.
         """
         from chaosengineer.cli import _execute_run
 
@@ -138,9 +135,14 @@ class TestIrishMusicPipeline:
             scripted_results = IRISH_MUSIC_DIR / "scripted_results.yaml"
             mode = "sequential"
             output_dir = tmp_path / "output"
-            initial_baseline = 2.08
+            initial_baseline = None
 
         _execute_run(Args())
 
         events_file = Args.output_dir / "events.jsonl"
         assert events_file.exists()
+
+        import json
+        events = [json.loads(line) for line in events_file.read_text().splitlines()]
+        breakthroughs = [e for e in events if e["event"] == "breakthrough"]
+        assert len(breakthroughs) == 6
