@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from unittest.mock import patch, MagicMock
 
 from chaosengineer.core.interfaces import DimensionPlan
 from chaosengineer.core.models import (
@@ -15,6 +16,7 @@ from chaosengineer.core.models import (
     DimensionSpec,
     DimensionType,
 )
+from chaosengineer.llm import create_decision_maker
 from chaosengineer.llm.decision_maker import LLMDecisionMaker
 from chaosengineer.llm.harness import LLMHarness, Usage
 from chaosengineer.workloads.parser import WorkloadSpec
@@ -163,3 +165,24 @@ class TestLastCostUsd:
         dm = LLMDecisionMaker(harness, _make_spec(), tmp_path)
         # FakeHarness inherits default last_usage (all zeros)
         assert dm.last_cost_usd == 0.0
+
+
+class TestFactory:
+    def test_claude_code_backend(self, tmp_path):
+        dm = create_decision_maker("claude-code", _make_spec(), tmp_path)
+        assert isinstance(dm, LLMDecisionMaker)
+        from chaosengineer.llm.claude_code import ClaudeCodeHarness
+        assert isinstance(dm.harness, ClaudeCodeHarness)
+
+    def test_sdk_backend(self, tmp_path):
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            mock_anthropic.Anthropic.return_value = MagicMock()
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+                dm = create_decision_maker("sdk", _make_spec(), tmp_path)
+        assert isinstance(dm, LLMDecisionMaker)
+        from chaosengineer.llm.sdk import SDKHarness
+        assert isinstance(dm.harness, SDKHarness)
+
+    def test_unknown_backend_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown backend"):
+            create_decision_maker("openai", _make_spec(), tmp_path)
