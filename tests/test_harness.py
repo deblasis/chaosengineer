@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 
 from chaosengineer.llm.harness import extract_json
 from chaosengineer.llm.claude_code import ClaudeCodeHarness
+from chaosengineer.llm.sdk import SDKHarness
 
 
 class TestExtractJson:
@@ -104,3 +105,108 @@ class TestClaudeCodeHarness:
         usage = harness.last_usage
         assert usage.cost_usd == 0.0
         assert usage.tokens_in == 0
+
+
+class TestSDKHarness:
+    def _mock_response(self, text, input_tokens=100, output_tokens=50):
+        """Build a mock Anthropic API response."""
+        content_block = MagicMock()
+        content_block.text = text
+        response = MagicMock()
+        response.content = [content_block]
+        response.usage = MagicMock(input_tokens=input_tokens, output_tokens=output_tokens)
+        return response
+
+    def test_happy_path(self, tmp_path):
+        output_file = tmp_path / "decision_001.json"
+        response_json = '{"dimension_name": "lr", "values": [{"lr": 0.02}]}'
+        mock_response = self._mock_response(response_json)
+
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.Anthropic.return_value = mock_client
+
+            harness = SDKHarness(api_key="test-key")
+            result = harness.complete("system prompt", "user prompt", output_file)
+
+        assert result == {"dimension_name": "lr", "values": [{"lr": 0.02}]}
+        assert output_file.read_text()  # file was written for audit
+
+    def test_env_vars(self, tmp_path):
+        output_file = tmp_path / "decision_001.json"
+        mock_response = self._mock_response('{"done": true}')
+
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.Anthropic.return_value = mock_client
+
+            with patch.dict("os.environ", {
+                "ANTHROPIC_API_KEY": "env-key",
+                "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                "ANTHROPIC_MODEL": "glm-4.7",
+            }):
+                harness = SDKHarness()
+                harness.complete("sys", "usr", output_file)
+
+            # Check Anthropic client was created with env base_url
+            mock_anthropic.Anthropic.assert_called_with(
+                api_key="env-key",
+                base_url="https://api.z.ai/api/anthropic",
+            )
+            # Check model from env was used
+            create_call = mock_client.messages.create.call_args
+            assert create_call.kwargs["model"] == "glm-4.7"
+
+    def test_cost_tracking(self, tmp_path):
+        output_file = tmp_path / "decision_001.json"
+        mock_response = self._mock_response('{"done": true}', input_tokens=500, output_tokens=200)
+
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.Anthropic.return_value = mock_client
+
+            harness = SDKHarness(api_key="test-key")
+            harness.complete("sys", "usr", output_file)
+
+        usage = harness.last_usage
+        assert usage.tokens_in == 500
+        assert usage.tokens_out == 200
+        assert usage.cost_usd > 0  # some estimated cost
+
+    def test_no_api_key_raises(self):
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            with patch.dict("os.environ", {}, clear=True):
+                with pytest.raises(ValueError, match="No API key"):
+                    SDKHarness()
+
+    def test_api_error_propagates(self, tmp_path):
+        output_file = tmp_path / "decision_001.json"
+
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.side_effect = Exception("API rate limited")
+            mock_anthropic.Anthropic.return_value = mock_client
+
+            harness = SDKHarness(api_key="test-key")
+            with pytest.raises(Exception, match="API rate limited"):
+                harness.complete("sys", "usr", output_file)
+
+    def test_explicit_params_override_env(self, tmp_path):
+        output_file = tmp_path / "decision_001.json"
+        mock_response = self._mock_response('{"done": true}')
+
+        with patch("chaosengineer.llm.sdk.anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.Anthropic.return_value = mock_client
+
+            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-key", "ANTHROPIC_MODEL": "env-model"}):
+                harness = SDKHarness(api_key="explicit-key", model="explicit-model")
+                harness.complete("sys", "usr", output_file)
+
+            mock_anthropic.Anthropic.assert_called_with(api_key="explicit-key", base_url=None)
+            create_call = mock_client.messages.create.call_args
+            assert create_call.kwargs["model"] == "explicit-model"
