@@ -206,3 +206,76 @@ class TestNoPauseController:
 
         coordinator.run()
         assert coordinator.budget.experiments_run == 2
+
+
+class TestKillResumeRoundTrip:
+    def test_kill_mid_iteration_produces_resumable_snapshot(self, tmp_path):
+        """Kill mid-iteration → kill_issued auto-pauses → snapshot → resume completes it."""
+        from chaosengineer.core.snapshot import build_snapshot, StopReason
+
+        spec = _make_spec(BudgetConfig(max_experiments=10))
+
+        # First run: 2 experiments planned, second fails (simulating kill)
+        plans_run1 = [DimensionPlan("lr", [{"lr": 0.01}, {"lr": 0.1}])]
+        results_run1 = {
+            "exp-0-0": ExperimentResult(primary_metric=2.5),
+            "exp-0-1": ExperimentResult(primary_metric=0.0, error_message="killed"),
+        }
+
+        pc = PauseController()
+        # Mock mid-iteration menu to return "kill"
+        pc.show_mid_iteration_menu = MagicMock(return_value="kill")
+
+        # Simulate Ctrl+C arriving after the first worker completes: use a
+        # ScriptedExecutor subclass that sets pause_requested after exp-0-0.
+        class KillAfterFirstExecutor(ScriptedExecutor):
+            def run_experiment(self, experiment_id, params, command, baseline_commit, resource=""):
+                result = super().run_experiment(experiment_id, params, command, baseline_commit, resource)
+                if experiment_id == "exp-0-0":
+                    pc.pause_requested = True
+                return result
+
+        log_path = tmp_path / "events.jsonl"
+        coordinator = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans_run1),
+            executor=KillAfterFirstExecutor(results_run1),
+            logger=EventLogger(log_path),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline("aaa", 3.0, "loss"),
+            pause_controller=pc,
+        )
+
+        coordinator.run()
+
+        # Verify kill_issued caused auto-pause
+        assert pc.kill_issued is True
+
+        # Verify run_paused event exists
+        paused = EventLogger(log_path).read_events("run_paused")
+        assert len(paused) == 1
+        assert paused[0]["reason"] == "user_requested"
+
+        # Build snapshot and verify it's resumable
+        snapshot = build_snapshot(log_path)
+        assert snapshot.stop_reason == StopReason.PAUSED
+
+        # Resume: complete the missing work
+        plans_run2 = []  # No new dims after gap fill
+        results_run2 = {
+            "exp-0-1": ExperimentResult(primary_metric=2.6),
+        }
+
+        log_path2 = tmp_path / "events2.jsonl"
+        import shutil
+        shutil.copy(log_path, log_path2)
+
+        coordinator2 = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans_run2),
+            executor=ScriptedExecutor(results_run2),
+            logger=EventLogger(log_path2),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline("aaa", 3.0, "loss"),
+        )
+        coordinator2.resume_from_snapshot(snapshot)
