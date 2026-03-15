@@ -72,7 +72,7 @@ def _parse_dimensions(text: str) -> list[DimensionSpec]:
 
         # Directional: "name" (currently value)
         dir_match = re.match(
-            r'Directional:\s*"(\w+)"\s*\(currently\s+([\d.]+)\)', line
+            r'Directional:\s*"([^"]+)"\s*\(currently\s+([\d.]+)\)', line
         )
         if dir_match:
             dims.append(DimensionSpec(
@@ -84,7 +84,7 @@ def _parse_dimensions(text: str) -> list[DimensionSpec]:
 
         # Enum: "name" options: A, B, C
         enum_match = re.match(
-            r'Enum:\s*"(\w+)"\s*options:\s*(.+)', line
+            r'Enum:\s*"([^"]+)"\s*options:\s*(.+)', line
         )
         if enum_match:
             options = [o.strip() for o in enum_match.group(2).split(",")]
@@ -96,7 +96,7 @@ def _parse_dimensions(text: str) -> list[DimensionSpec]:
             continue
 
         # Diverse: "name"
-        diverse_match = re.match(r'Diverse:\s*"(\w+)"', line)
+        diverse_match = re.match(r'Diverse:\s*"([^"]+)"', line)
         if diverse_match:
             dims.append(DimensionSpec(
                 name=diverse_match.group(1),
