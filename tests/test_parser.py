@@ -191,3 +191,61 @@ A simple test workload.
 """
         spec = parse_workload_spec(content=md)
         assert spec.dimensions[0].name == "learning rate"
+
+    def test_parse_baseline_metric_value(self):
+        md = """# Workload: Test
+## Experiment Space
+## Execution
+- Command: `echo`
+## Evaluation
+- Metric: score (lower is better)
+## Baseline
+- Metric value: 2.08
+## Resources
+- Available: 1
+"""
+        spec = parse_workload_spec(content=md)
+        assert spec.baseline_metric_value == pytest.approx(2.08)
+
+    def test_absent_baseline_is_none(self):
+        md = """# Workload: Test
+## Experiment Space
+## Execution
+- Command: `echo`
+## Evaluation
+- Metric: score (lower is better)
+## Resources
+- Available: 1
+"""
+        spec = parse_workload_spec(content=md)
+        assert spec.baseline_metric_value is None
+
+    def test_parse_negative_baseline_metric_value(self):
+        md = """# Workload: Test
+## Experiment Space
+## Execution
+- Command: `echo`
+## Evaluation
+- Metric: loglik (higher is better)
+## Baseline
+- Metric value: -1.23
+## Resources
+- Available: 1
+"""
+        spec = parse_workload_spec(content=md)
+        assert spec.baseline_metric_value == pytest.approx(-1.23)
+
+    def test_parse_scientific_notation_baseline(self):
+        md = """# Workload: Test
+## Experiment Space
+## Execution
+- Command: `echo`
+## Evaluation
+- Metric: loss (lower is better)
+## Baseline
+- Metric value: 1.5e-3
+## Resources
+- Available: 1
+"""
+        spec = parse_workload_spec(content=md)
+        assert spec.baseline_metric_value == pytest.approx(0.0015)
