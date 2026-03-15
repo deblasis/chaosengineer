@@ -42,6 +42,16 @@ class DecisionMaker(ABC):
         """Discover the saturated set for a diverse dimension."""
 
 
+@dataclass
+class ExperimentTask:
+    """Input packet for a single experiment."""
+    experiment_id: str
+    params: dict[str, Any]
+    command: str
+    baseline_commit: str
+    resource: str = ""
+
+
 class ExperimentExecutor(ABC):
     """Interface for running experiments.
 
@@ -59,3 +69,24 @@ class ExperimentExecutor(ABC):
         resource: str = "",
     ) -> ExperimentResult:
         """Run an experiment and return its result."""
+
+    def run_experiments(self, tasks: list[ExperimentTask]) -> list[ExperimentResult]:
+        """Run a batch of experiments. Default: sequential.
+
+        Postcondition: always returns exactly one ExperimentResult per input task.
+        Failures are captured as ExperimentResult with error_message set, never raised.
+        """
+        results = []
+        for t in tasks:
+            try:
+                results.append(
+                    self.run_experiment(
+                        t.experiment_id, t.params, t.command, t.baseline_commit, t.resource
+                    )
+                )
+            except Exception as e:
+                results.append(ExperimentResult(
+                    primary_metric=0.0,
+                    error_message=f"Executor error for {t.experiment_id}: {e}",
+                ))
+        return results
