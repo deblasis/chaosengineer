@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from chaosengineer.core.models import Baseline, DimensionSpec, ExperimentResult
 
@@ -74,23 +74,37 @@ class ExperimentExecutor(ABC):
     ) -> ExperimentResult:
         """Run an experiment and return its result."""
 
-    def run_experiments(self, tasks: list[ExperimentTask]) -> list[ExperimentResult]:
+    def run_experiments(
+        self,
+        tasks: list[ExperimentTask],
+        on_worker_done: "Callable[[ExperimentTask, ExperimentResult, int, int], None] | None" = None,
+    ) -> list[ExperimentResult]:
         """Run a batch of experiments. Default: sequential.
 
         Postcondition: always returns exactly one ExperimentResult per input task.
         Failures are captured as ExperimentResult with error_message set, never raised.
+
+        Args:
+            on_worker_done: Optional callback(task, result, completed_count, total_count)
+                called after each experiment completes.
         """
         results = []
-        for t in tasks:
+        total = len(tasks)
+        for i, t in enumerate(tasks):
             try:
-                results.append(
-                    self.run_experiment(
-                        t.experiment_id, t.params, t.command, t.baseline_commit, t.resource
-                    )
+                result = self.run_experiment(
+                    t.experiment_id, t.params, t.command, t.baseline_commit, t.resource
                 )
             except Exception as e:
-                results.append(ExperimentResult(
+                result = ExperimentResult(
                     primary_metric=0.0,
                     error_message=f"Executor error for {t.experiment_id}: {e}",
-                ))
+                )
+            results.append(result)
+            if on_worker_done is not None:
+                on_worker_done(t, result, i + 1, total)
         return results
+
+    def kill_active(self) -> None:
+        """Kill any in-flight experiments. Default: no-op."""
+        pass

@@ -82,3 +82,46 @@ class TestRunExperimentsDefault:
         assert len(results) == 2
         assert results[0].primary_metric == 0.91
         assert results[1].primary_metric == 0.95
+
+
+class TestRunExperimentsCallback:
+    def test_callback_called_per_result(self):
+        from unittest.mock import MagicMock
+        from chaosengineer.core.interfaces import ExperimentTask, ExperimentExecutor
+        from chaosengineer.core.models import ExperimentResult
+
+        class SimpleExecutor(ExperimentExecutor):
+            def run_experiment(self, experiment_id, params, command, baseline_commit, resource=""):
+                return ExperimentResult(primary_metric=1.0)
+
+        executor = SimpleExecutor()
+        tasks = [
+            ExperimentTask("e-0", {"lr": 0.1}, "echo", "abc"),
+            ExperimentTask("e-1", {"lr": 0.2}, "echo", "abc"),
+        ]
+        callback = MagicMock()
+        results = executor.run_experiments(tasks, on_worker_done=callback)
+
+        assert len(results) == 2
+        assert callback.call_count == 2
+        assert callback.call_args_list[0][0][2] == 1  # completed count
+        assert callback.call_args_list[0][0][3] == 2  # total count
+        assert callback.call_args_list[1][0][2] == 2
+
+    def test_callback_none_is_fine(self):
+        class SimpleExecutor(ExperimentExecutor):
+            def run_experiment(self, experiment_id, params, command, baseline_commit, resource=""):
+                return ExperimentResult(primary_metric=1.0)
+
+        executor = SimpleExecutor()
+        tasks = [ExperimentTask("e-0", {"lr": 0.1}, "echo", "abc")]
+        results = executor.run_experiments(tasks)
+        assert len(results) == 1
+
+    def test_kill_active_default_noop(self):
+        class SimpleExecutor(ExperimentExecutor):
+            def run_experiment(self, experiment_id, params, command, baseline_commit, resource=""):
+                return ExperimentResult(primary_metric=1.0)
+
+        executor = SimpleExecutor()
+        executor.kill_active()  # Should not raise
