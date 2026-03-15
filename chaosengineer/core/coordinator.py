@@ -100,6 +100,10 @@ class Coordinator:
                 "workload": self.spec.name,
                 "budget": self.budget.config.to_dict(),
                 "baseline": self.best_baseline.to_dict(),
+                "run_id": self.run_state.run_id,
+                "mode": self.run_state.mode,
+                "metric_direction": self.spec.metric_direction,
+                "workload_spec_hash": self.spec.spec_hash(),
             },
         ))
         self.budget.start()
@@ -151,6 +155,15 @@ class Coordinator:
                         },
                     ))
 
+                iteration_tasks = [
+                    {
+                        "experiment_id": f"exp-{self._iteration}-{i}",
+                        "params": params,
+                        "command": self.spec.execution_command,
+                        "baseline_commit": baseline.commit,
+                    }
+                    for i, params in enumerate(plan.values)
+                ]
                 self._log(Event(
                     event="iteration_started",
                     data={
@@ -158,6 +171,7 @@ class Coordinator:
                         "num_workers": len(plan.values),
                         "iteration": self._iteration,
                         "branch_id": baseline.branch_id,
+                        "tasks": iteration_tasks,
                     },
                 ))
 
@@ -233,7 +247,13 @@ class Coordinator:
                 fail_experiment(exp, result)
                 self._log(Event(
                     event="worker_failed",
-                    data={"experiment_id": exp.experiment_id, "error": result.error_message},
+                    data={
+                        "experiment_id": exp.experiment_id,
+                        "error": result.error_message,
+                        "dimension": exp.dimension,
+                        "params": exp.params,
+                        "cost_usd": result.cost_usd,
+                    },
                 ))
             else:
                 complete_experiment(exp, result)
@@ -243,6 +263,9 @@ class Coordinator:
                         "experiment_id": exp.experiment_id,
                         "params": exp.params,
                         "result": result.to_dict(),
+                        "dimension": exp.dimension,
+                        "metric": result.primary_metric,
+                        "cost_usd": result.cost_usd,
                     },
                 ))
             release_worker(worker)
@@ -300,6 +323,8 @@ class Coordinator:
                     if active_baselines
                     else None,
                     "from_experiment": best_exp.experiment_id,
+                    "commit": best_result.commit_hash or best_exp.baseline_commit,
+                    "metric": best_metric,
                 },
             ))
 

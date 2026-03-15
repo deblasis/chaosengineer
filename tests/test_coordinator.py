@@ -642,3 +642,85 @@ class TestDiverseDimensionDiscovery:
         discovered = coordinator.logger.read_events(event_type="diverse_discovered")
         assert len(discovered) == 1
         assert discovered[0]["dimension"] == "strategy"
+
+
+class TestEnrichedEvents:
+    """Verify events contain fields needed by build_snapshot()."""
+
+    def _run_simple_coordinator(self, tmp_path, plans, results, budget_config):
+        spec = WorkloadSpec(
+            name="test", primary_metric="loss", metric_direction="lower",
+            execution_command="echo 1", workers_available=2,
+            budget=budget_config,
+        )
+        log_path = tmp_path / "events.jsonl"
+        coord = Coordinator(
+            spec=spec,
+            decision_maker=ScriptedDecisionMaker(plans),
+            executor=ScriptedExecutor(results),
+            logger=EventLogger(log_path),
+            budget=BudgetTracker(spec.budget),
+            initial_baseline=Baseline("abc", 3.0, "loss"),
+        )
+        coord.run()
+        return EventLogger(log_path)
+
+    def test_run_started_has_resume_fields(self, tmp_path):
+        plans = [DimensionPlan("lr", [{"lr": 0.1}])]
+        results = {"exp-0-0": ExperimentResult(primary_metric=2.0)}
+        logger = self._run_simple_coordinator(
+            tmp_path, plans, results, BudgetConfig(max_experiments=1))
+        events = logger.read_events("run_started")
+        e = events[0]
+        assert "run_id" in e
+        assert "mode" in e
+        assert "metric_direction" in e
+        assert "workload_spec_hash" in e
+
+    def test_iteration_started_has_tasks(self, tmp_path):
+        plans = [DimensionPlan("lr", [{"lr": 0.01}, {"lr": 0.1}])]
+        results = {
+            "exp-0-0": ExperimentResult(primary_metric=2.0),
+            "exp-0-1": ExperimentResult(primary_metric=2.5),
+        }
+        logger = self._run_simple_coordinator(
+            tmp_path, plans, results, BudgetConfig(max_experiments=2))
+        events = logger.read_events("iteration_started")
+        tasks = events[0].get("tasks", [])
+        assert len(tasks) == 2
+        assert all("experiment_id" in t for t in tasks)
+        assert all("params" in t for t in tasks)
+        assert all("command" in t for t in tasks)
+        assert all("baseline_commit" in t for t in tasks)
+
+    def test_worker_completed_has_dimension_and_top_level_metric(self, tmp_path):
+        plans = [DimensionPlan("lr", [{"lr": 0.1}])]
+        results = {"exp-0-0": ExperimentResult(primary_metric=2.0, cost_usd=0.5)}
+        logger = self._run_simple_coordinator(
+            tmp_path, plans, results, BudgetConfig(max_experiments=1))
+        events = logger.read_events("worker_completed")
+        e = events[0]
+        assert e["dimension"] == "lr"
+        assert e["metric"] == 2.0
+        assert e["cost_usd"] == 0.5
+
+    def test_worker_failed_has_dimension_and_params(self, tmp_path):
+        plans = [DimensionPlan("lr", [{"lr": 0.1}])]
+        results = {"exp-0-0": ExperimentResult(primary_metric=0.0, error_message="OOM")}
+        logger = self._run_simple_coordinator(
+            tmp_path, plans, results, BudgetConfig(max_experiments=1))
+        events = logger.read_events("worker_failed")
+        e = events[0]
+        assert e["dimension"] == "lr"
+        assert "params" in e
+        assert "cost_usd" in e
+
+    def test_breakthrough_has_commit_and_metric(self, tmp_path):
+        plans = [DimensionPlan("lr", [{"lr": 0.1}])]
+        results = {"exp-0-0": ExperimentResult(primary_metric=2.0, commit_hash="newcommit")}
+        logger = self._run_simple_coordinator(
+            tmp_path, plans, results, BudgetConfig(max_experiments=1))
+        events = logger.read_events("breakthrough")
+        assert len(events) == 1
+        assert events[0]["metric"] == 2.0
+        assert events[0]["commit"] == "newcommit"

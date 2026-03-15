@@ -34,6 +34,11 @@ class WorkloadSpec:
             return new_value < old_value
         return new_value > old_value
 
+    def spec_hash(self) -> str:
+        import hashlib
+        content = f"{self.name}|{self.primary_metric}|{self.metric_direction}|{self.execution_command}"
+        return "sha256:" + hashlib.sha256(content.encode()).hexdigest()[:16]
+
 
 def _extract_sections(markdown: str) -> dict[str, str]:
     """Split markdown into {heading: content} pairs."""
