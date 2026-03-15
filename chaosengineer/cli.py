@@ -113,6 +113,39 @@ def main():
         parser.print_help()
 
 
+def detect_baseline(spec) -> float:
+    """Run the workload once to measure the initial baseline metric."""
+    import subprocess
+
+    print(f"No baseline specified. Running workload to measure initial baseline...")
+
+    result = subprocess.run(
+        spec.execution_command, shell=True, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"Error: baseline execution failed: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    result = subprocess.run(
+        spec.metric_parse_command, shell=True, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"Error: baseline metric parse failed: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        value = float(result.stdout.strip())
+    except ValueError:
+        print(
+            f"Error: could not parse baseline metric from output: {result.stdout.strip()!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"Initial baseline: {spec.primary_metric} = {value}")
+    return value
+
+
 def _execute_run(args):
     """Execute a workload run with the specified backends."""
     import uuid

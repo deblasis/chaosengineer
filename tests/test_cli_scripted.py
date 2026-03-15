@@ -4,8 +4,10 @@ import json
 import pytest
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import patch, MagicMock
 
 from chaosengineer.cli import _execute_run
+from chaosengineer.workloads.parser import WorkloadSpec
 
 
 class FakeArgs:
@@ -87,3 +89,61 @@ class TestScriptedBackend:
         events = [json.loads(line) for line in events_file.read_text().splitlines()]
         completed = [e for e in events if e["event"] == "worker_completed"]
         assert len(completed) == 1
+
+
+class TestDetectBaseline:
+    """Tests for detect_baseline subprocess auto-detection."""
+
+    def _make_spec(self):
+        return WorkloadSpec(
+            name="test",
+            execution_command="echo test",
+            primary_metric="val_bpb",
+            metric_direction="lower",
+            metric_parse_command="echo 2.08",
+        )
+
+    def test_detect_baseline_runs_commands(self):
+        from chaosengineer.cli import detect_baseline
+
+        spec = self._make_spec()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="2.08\n")
+            result = detect_baseline(spec)
+
+        assert result == pytest.approx(2.08)
+        assert mock_run.call_count == 2  # execution + parse
+
+    def test_detect_baseline_exits_on_execution_failure(self):
+        from chaosengineer.cli import detect_baseline
+
+        spec = self._make_spec()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="error")
+            with pytest.raises(SystemExit):
+                detect_baseline(spec)
+
+    def test_detect_baseline_exits_on_unparseable_metric(self):
+        from chaosengineer.cli import detect_baseline
+
+        spec = self._make_spec()
+        with patch("subprocess.run") as mock_run:
+            # First call (execution) succeeds, second call (parse) returns garbage
+            mock_run.side_effect = [
+                MagicMock(returncode=0),
+                MagicMock(returncode=0, stdout="not-a-number\n"),
+            ]
+            with pytest.raises(SystemExit):
+                detect_baseline(spec)
+
+    def test_detect_baseline_exits_on_parse_failure(self):
+        from chaosengineer.cli import detect_baseline
+
+        spec = self._make_spec()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),
+                MagicMock(returncode=1, stderr="parse error"),
+            ]
+            with pytest.raises(SystemExit):
+                detect_baseline(spec)

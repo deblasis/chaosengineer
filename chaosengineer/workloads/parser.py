@@ -26,7 +26,6 @@ class WorkloadSpec:
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     modifiable_files: list[str] = field(default_factory=list)
     constraints_text: str = ""
-    baseline_metric_value: float | None = None
     raw_markdown: str = ""
 
     def is_better(self, new_value: float, old_value: float) -> bool:
@@ -199,15 +198,6 @@ def _parse_modifiable_files(text: str) -> list[str]:
     return files
 
 
-def _parse_baseline_metric(text: str) -> float | None:
-    match = re.search(
-        r"Metric\s+value:\s*([-+]?[\d.]+(?:[eE][-+]?\d+)?)", text, re.IGNORECASE
-    )
-    if not match:
-        return None
-    return float(match.group(1))
-
-
 def parse_workload_spec(
     path: Path | str | None = None,
     content: str | None = None,
@@ -242,10 +232,6 @@ def parse_workload_spec(
     constraints_section = sections.get("Constraints", "")
     modifiable_files = _parse_modifiable_files(constraints_section)
 
-    # Baseline
-    baseline_section = sections.get("Baseline", "")
-    baseline_value = _parse_baseline_metric(baseline_section)
-
     return WorkloadSpec(
         name=_parse_name(content),
         context=sections.get("Context", ""),
@@ -261,6 +247,5 @@ def parse_workload_spec(
         budget=budget,
         modifiable_files=modifiable_files,
         constraints_text=constraints_section,
-        baseline_metric_value=baseline_value,
         raw_markdown=content,
     )
