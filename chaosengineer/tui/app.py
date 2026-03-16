@@ -105,7 +105,14 @@ class ChaosApp(App):
 
     def on_mount(self) -> None:
         table = self.query_one("#experiment-table", DataTable)
-        table.add_columns("#", "Worker", "Dimension", "Status", "Cost", "Delta")
+        table.add_columns(
+            ("#", "#"),
+            ("Worker", "Worker"),
+            ("Dimension", "Dimension"),
+            ("Status", "Status"),
+            ("Cost", "Cost"),
+            ("Delta", "Delta"),
+        )
 
         # Replay history FIRST, then subscribe for live events.
         for event in self._bridge.snapshot():
