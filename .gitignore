@@ -24,5 +24,11 @@ dev/
 results.tsv
 .superpowers/
 
+# ChaosEngineer runtime output
+.chaosengineer/
+
+# Internal development plans/specs
+docs/superpowers/
+
 # Go bus binary
 bus/chaos-bus

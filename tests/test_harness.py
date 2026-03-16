@@ -144,8 +144,8 @@ class TestSDKHarness:
 
             with patch.dict("os.environ", {
                 "ANTHROPIC_API_KEY": "env-key",
-                "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-                "ANTHROPIC_MODEL": "glm-4.7",
+                "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1",
+                "ANTHROPIC_MODEL": "anthropic/claude-sonnet-4",
             }):
                 harness = SDKHarness()
                 harness.complete("sys", "usr", output_file)
@@ -153,11 +153,11 @@ class TestSDKHarness:
             # Check Anthropic client was created with env base_url
             mock_anthropic.Anthropic.assert_called_with(
                 api_key="env-key",
-                base_url="https://api.z.ai/api/anthropic",
+                base_url="https://openrouter.ai/api/v1",
             )
             # Check model from env was used
             create_call = mock_client.messages.create.call_args
-            assert create_call.kwargs["model"] == "glm-4.7"
+            assert create_call.kwargs["model"] == "anthropic/claude-sonnet-4"
 
     def test_cost_tracking(self, tmp_path):
         output_file = tmp_path / "decision_001.json"

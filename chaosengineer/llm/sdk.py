@@ -25,7 +25,8 @@ class SDKHarness(LLMHarness):
 
     Reads configuration from constructor args or environment variables:
     - ANTHROPIC_API_KEY
-    - ANTHROPIC_BASE_URL (for alternative providers like Z.AI, OpenRouter)
+    - ANTHROPIC_BASE_URL (for alternative Anthropic-compatible providers,
+      e.g. OpenRouter, Z.AI, Kimi)
     - ANTHROPIC_MODEL (default: claude-sonnet-4-20250514)
     """
 
