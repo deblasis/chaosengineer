@@ -46,6 +46,8 @@ class Coordinator:
         run_id: str | None = None,
         pause_controller: "PauseController | None" = None,
         status_display: "StatusDisplay | None" = None,
+        view_manager: "ViewManager | None" = None,
+        pause_gate: "PauseGate | None" = None,
     ):
         self.spec = spec
         self.decision_maker = decision_maker
@@ -64,6 +66,8 @@ class Coordinator:
         self._history: list[dict] = []
         self._pause_controller = pause_controller
         self._status_display = status_display
+        self._view_manager = view_manager
+        self._pause_gate = pause_gate
         self._budget_lock = threading.Lock()
 
     def _log(self, event: Event) -> None:
@@ -161,7 +165,14 @@ class Coordinator:
             self._poll_bus_commands()
             # Pause check: before starting new iteration
             if self._pause_controller and self._pause_controller.pause_requested and self._pause_controller.should_show_menu():
-                choice = self._pause_controller.show_post_iteration_menu()
+                if self._view_manager and self._view_manager.tui_active and self._pause_gate:
+                    self._log(Event(
+                        event="pause_decision_needed",
+                        data={"options": ["continue", "pause"]},
+                    ))
+                    choice = self._pause_gate.request_decision(["continue", "pause"])
+                else:
+                    choice = self._pause_controller.show_post_iteration_menu()
                 if choice == "pause":
                     self._log_user_pause(active_baselines)
                     return
@@ -258,10 +269,17 @@ class Coordinator:
                     return
                 # Pause check: after iteration (wait_then_ask or pause_requested)
                 if self._pause_controller and self._pause_controller.should_show_menu():
-                    choice = self._pause_controller.show_post_iteration_menu(
-                        f"Iteration {self._iteration - 1} complete. "
-                        f"{self.spec.primary_metric}={self.best_baseline.metric_value}"
-                    )
+                    if self._view_manager and self._view_manager.tui_active and self._pause_gate:
+                        self._log(Event(
+                            event="pause_decision_needed",
+                            data={"options": ["continue", "pause"]},
+                        ))
+                        choice = self._pause_gate.request_decision(["continue", "pause"])
+                    else:
+                        choice = self._pause_controller.show_post_iteration_menu(
+                            f"Iteration {self._iteration - 1} complete. "
+                            f"{self.spec.primary_metric}={self.best_baseline.metric_value}"
+                        )
                     if choice == "pause":
                         self._log_user_pause(active_baselines)
                         return
@@ -473,15 +491,18 @@ class Coordinator:
                         and self._pause_controller.pause_requested
                         and not self._pause_controller.kill_issued
                         and completed < total):
-                    choice = self._pause_controller.show_mid_iteration_menu(completed, total)
-                    if choice == "kill":
-                        self._pause_controller.kill_issued = True
-                        self.executor.kill_active()
-                    elif choice == "wait":
-                        self._pause_controller.wait_then_ask = True
-                        self._pause_controller.pause_requested = False
-                    elif choice == "continue":
-                        self._pause_controller.reset()
+                    if self._view_manager and self._view_manager.tui_active and self._pause_gate:
+                        pass  # TUI handles pause decisions — don't show interactive menu
+                    else:
+                        choice = self._pause_controller.show_mid_iteration_menu(completed, total)
+                        if choice == "kill":
+                            self._pause_controller.kill_issued = True
+                            self.executor.kill_active()
+                        elif choice == "wait":
+                            self._pause_controller.wait_then_ask = True
+                            self._pause_controller.pause_requested = False
+                        elif choice == "continue":
+                            self._pause_controller.reset()
             callback = _on_worker_done
 
         # Phase 2: Execute batch
