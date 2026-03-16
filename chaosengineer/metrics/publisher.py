@@ -69,7 +69,9 @@ class EventPublisher:
         try:
             urllib.request.urlopen(req, timeout=5)
         except Exception:
-            # Fall back to direct file write on connection error
+            # Create fallback lazily on first bus failure
+            if self._fallback is None and self._fallback_path:
+                self._fallback = EventLogger(self._fallback_path)
             if self._fallback:
                 self._fallback.log(event)
             else:
