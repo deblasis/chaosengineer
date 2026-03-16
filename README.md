@@ -99,9 +99,9 @@ ChaosEngineer is an evolution of autoresearch into a general-purpose parallel ex
 - **Workload specs** — define your optimization problem in a simple Markdown format: what to run, what to measure, what parameters to explore, and budget limits. ChaosEngineer handles the rest.
 - **Budget tracking** — set limits on API cost, experiment count, wall-clock time, or plateau iterations. ChaosEngineer stops gracefully when any limit is hit.
 - **Pause and resume** — Ctrl+C triggers a graceful pause. Resume later with `chaosengineer resume`, optionally extending the budget.
-- **TUI dashboard** — toggle a live terminal dashboard (press `t`) to see experiment progress, metrics, and budget status in real time. Or attach read-only to a running session with `chaosengineer monitor`.
+- **TUI dashboard** — toggle a live terminal dashboard (press `t`) to see experiment progress, metrics, and budget status in real time.
 - **Human-in-the-loop evaluation** — for workloads where quality can't be measured automatically (creative output, UX, etc.), ChaosEngineer can pause after each experiment and ask a human to score the result via the TUI.
-- **Event bus** — a lightweight Go-based message bus streams events (iterations, breakthroughs, completions) as NDJSON for external tooling or remote monitoring.
+- **Event bus** — an in-process event bus streams experiment events (iterations, breakthroughs, completions) to the TUI dashboard in real time.
 - **Scripted/demo mode** — replay recorded experiment runs without a GPU or API key, useful for testing and demos.
 
 ### Installation
@@ -143,7 +143,6 @@ chaosengineer run workloads/autoresearch-irish-music.md \
 |---------|-------------|
 | `chaosengineer run WORKLOAD` | Start a new experiment run from a workload spec |
 | `chaosengineer resume OUTPUT_DIR WORKLOAD` | Resume a paused or crashed run, optionally extending budget |
-| `chaosengineer monitor BUS_URL` | Attach a read-only TUI dashboard to a running session (bus URL is printed to console when a run starts; optional `--run-id` to filter) |
 | `chaosengineer test [SCENARIO_YAML]` | Run a scenario YAML file, or all built-in scenarios if omitted |
 | `chaosengineer version` | Print version |
 
@@ -249,15 +248,15 @@ The `## Baseline` section is optional for live runs (ChaosEngineer can auto-dete
 ├──────────────────┴──────────────────────────────────┤
 │  Metrics & Events                                   │
 │  ┌────────────┐ ┌────────────┐ ┌─────────────────┐ │
-│  │ Event      │ │ Event      │ │ Chaos Bus       │ │
-│  │ Logger     │ │ Publisher  │ │ (Go, NDJSON)    │ │
+│  │ Event      │ │ Event      │ │ Event           │ │
+│  │ Logger     │ │ Publisher  │ │ Bridge (bus.py) │ │
 │  └────────────┘ └────────────┘ └─────────────────┘ │
 ├─────────────────────────────────────────────────────┤
 │  TUI Dashboard (Textual)                            │
-│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌─────────┐ │
-│  │ Budget   │ │ Experiment│ │ Eval   │ │ Monitor │ │
-│  │ Bar      │ │ Table    │ │ Gate   │ │ Client  │ │
-│  └──────────┘ └──────────┘ └────────┘ └─────────┘ │
+│  ┌──────────┐ ┌──────────────┐ ┌──────────────────┐│
+│  │ Budget   │ │ Experiment   │ │ Eval             ││
+│  │ Bar      │ │ Table        │ │ Gate             ││
+│  └──────────┘ └──────────────┘ └──────────────────┘│
 └─────────────────────────────────────────────────────┘
 ```
 
