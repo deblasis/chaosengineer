@@ -19,7 +19,9 @@ class PauseGate:
         self.decision = None
         self.decision_ready.clear()
         self.decision_needed.set()
-        self.decision_ready.wait()
+        if not self.decision_ready.wait(timeout=300):
+            # Timeout — TUI may have crashed. Default to continue.
+            self.decision = "continue"
         self.decision_needed.clear()
         return self.decision
 

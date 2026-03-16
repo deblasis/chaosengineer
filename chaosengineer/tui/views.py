@@ -102,3 +102,6 @@ class ViewManager:
         finally:
             self.tui_active = False
             self._status_display.suppressed = False
+            # Unblock coordinator if a pause decision was pending when TUI exited
+            if self._pause_gate.decision_needed.is_set():
+                self._pause_gate.submit_decision("continue")

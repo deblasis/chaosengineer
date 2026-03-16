@@ -226,8 +226,7 @@ class ChaosApp(App):
     def _on_pause_decision_needed(self, event: dict) -> None:
         """Show notification and let user decide via keybindings."""
         log = self.query_one("#event-log", RichLog)
-        log.write("[bold yellow]PAUSE REQUESTED[/bold yellow] — Press [P] to pause or [C] to continue")
-        self._pending_pause = True
+        log.write("[bold yellow]PAUSE REQUESTED[/bold yellow] — Press [P] to pause or [Q] to continue and exit TUI")
 
     def action_pause(self) -> None:
         """Handle P key — pause the coordinator."""
