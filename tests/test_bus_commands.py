@@ -96,7 +96,7 @@ class TestPollBusCommands:
         assert coord.budget.config.max_wall_time_seconds == 900.0
 
     def test_extend_budget_from_none(self):
-        """Extending a None budget field should start from 0."""
+        """Extending a None budget field (unlimited) keeps it None — None means unlimited."""
         logger = MagicMock()
         logger.poll_commands.return_value = [
             {"command": "extend_budget", "add_cost_usd": 10.0}
@@ -107,7 +107,7 @@ class TestPollBusCommands:
         )
         coord._poll_bus_commands()
 
-        assert coord.budget.config.max_api_cost == 10.0
+        assert coord.budget.config.max_api_cost is None
 
     def test_no_poll_when_logger_lacks_method(self):
         """EventLogger doesn't have poll_commands — should be a no-op."""

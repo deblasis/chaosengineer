@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -63,6 +64,7 @@ class Coordinator:
         self._history: list[dict] = []
         self._pause_controller = pause_controller
         self._status_display = status_display
+        self._budget_lock = threading.Lock()
 
     def _log(self, event: Event) -> None:
         """Log an event and append to in-memory history."""
@@ -79,29 +81,23 @@ class Coordinator:
             if cmd.get("command") == "pause" and self._pause_controller:
                 self._pause_controller.pause_requested = True
             elif cmd.get("command") == "extend_budget":
-                bc = self.budget.config
-                if cmd.get("add_cost_usd"):
-                    bc = BudgetConfig(
-                        max_api_cost=(bc.max_api_cost or 0) + cmd["add_cost_usd"],
-                        max_experiments=bc.max_experiments,
-                        max_wall_time_seconds=bc.max_wall_time_seconds,
-                        max_plateau_iterations=bc.max_plateau_iterations,
-                    )
-                if cmd.get("add_experiments"):
-                    bc = BudgetConfig(
-                        max_api_cost=bc.max_api_cost,
-                        max_experiments=(bc.max_experiments or 0) + cmd["add_experiments"],
-                        max_wall_time_seconds=bc.max_wall_time_seconds,
-                        max_plateau_iterations=bc.max_plateau_iterations,
-                    )
-                if cmd.get("add_time_seconds"):
-                    bc = BudgetConfig(
-                        max_api_cost=bc.max_api_cost,
-                        max_experiments=bc.max_experiments,
-                        max_wall_time_seconds=(bc.max_wall_time_seconds or 0) + cmd["add_time_seconds"],
-                        max_plateau_iterations=bc.max_plateau_iterations,
-                    )
-                self.budget.config = bc
+                self.extend_budget(
+                    add_cost=cmd.get("add_cost_usd", 0),
+                    add_experiments=cmd.get("add_experiments", 0),
+                    add_time=cmd.get("add_time_seconds", 0),
+                )
+
+    def extend_budget(self, add_cost: float = 0, add_experiments: int = 0,
+                      add_time: float = 0) -> None:
+        """Extend budget limits. Thread-safe — called from TUI or bus command polling."""
+        with self._budget_lock:
+            cfg = self.budget.config
+            self.budget.config = BudgetConfig(
+                max_api_cost=(cfg.max_api_cost + add_cost) if cfg.max_api_cost is not None else None,
+                max_experiments=(cfg.max_experiments + add_experiments) if cfg.max_experiments is not None else None,
+                max_wall_time_seconds=(cfg.max_wall_time_seconds + add_time) if cfg.max_wall_time_seconds is not None else None,
+                max_plateau_iterations=cfg.max_plateau_iterations,
+            )
 
     def _discover_diverse_dimensions(self) -> None:
         """Discover options for DIVERSE dimensions before the main loop."""
