@@ -1,0 +1,28 @@
+// proto/chaos/v1/bus.proto
+syntax = "proto3";
+package chaos.v1;
+
+option go_package = "chaos-bus/gen/chaos/v1;chaosv1";
+
+import "chaos/v1/events.proto";
+
+service BusService {
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+  rpc PauseRun(PauseRunRequest) returns (PauseRunResponse);
+  rpc ExtendBudget(ExtendBudgetRequest) returns (ExtendBudgetResponse);
+}
+
+message SubscribeRequest {
+  string run_id = 1;  // empty = current run
+}
+
+message PauseRunRequest { string run_id = 1; }
+message PauseRunResponse {}
+
+message ExtendBudgetRequest {
+  string run_id = 1;
+  double add_cost_usd = 2;
+  int32 add_experiments = 3;
+  double add_time_seconds = 4;
+}
+message ExtendBudgetResponse {}
