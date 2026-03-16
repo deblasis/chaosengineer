@@ -31,6 +31,7 @@ func startTestServer(t *testing.T, outputFile string) (string, func()) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/publish", NewPublishHandler(broker, queue))
 	mux.HandleFunc("/commands", NewCommandsHandler(queue))
+	mux.HandleFunc("/events", NewEventsHandler(broker))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
@@ -265,5 +266,84 @@ func TestIntegration_ExtendBudget(t *testing.T) {
 	}
 	if cmds[0]["add_cost_usd"] != 10.0 {
 		t.Errorf("add_cost_usd: got %v", cmds[0]["add_cost_usd"])
+	}
+}
+
+func TestIntegration_SubmitEvaluation(t *testing.T) {
+	baseURL, cleanup := startTestServer(t, "")
+	defer cleanup()
+
+	postEvent(baseURL, map[string]any{
+		"event":  "run_started",
+		"run_id": "run-eval",
+	})
+
+	client := chaosv1connect.NewBusServiceClient(
+		http.DefaultClient,
+		baseURL,
+	)
+	_, err := client.SubmitEvaluation(context.Background(), connect.NewRequest(
+		&chaosv1.SubmitEvaluationRequest{
+			RunId:        "run-eval",
+			ExperimentId: "exp-0-0",
+			Score:        0.85,
+			Note:         "looks good",
+		},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmds, _ := getCommands(baseURL)
+	if len(cmds) != 1 {
+		t.Fatalf("got %d commands, want 1", len(cmds))
+	}
+	if cmds[0]["command"] != "submit_evaluation" {
+		t.Errorf("got command %v", cmds[0]["command"])
+	}
+	if cmds[0]["experiment_id"] != "exp-0-0" {
+		t.Errorf("got experiment_id %v", cmds[0]["experiment_id"])
+	}
+	if cmds[0]["score"] != 0.85 {
+		t.Errorf("got score %v", cmds[0]["score"])
+	}
+}
+
+func TestIntegration_EventsStream(t *testing.T) {
+	baseURL, cleanup := startTestServer(t, "")
+	defer cleanup()
+
+	// Publish an event first
+	postEvent(baseURL, map[string]any{
+		"event":  "run_started",
+		"run_id": "run-stream",
+	})
+
+	// Connect to /events stream
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("got status %d", resp.StatusCode)
+	}
+
+	// Read first line -- should be the replayed event
+	buf := make([]byte, 4096)
+	n, _ := resp.Body.Read(buf)
+	line := strings.TrimSpace(string(buf[:n]))
+
+	var event map[string]any
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		t.Fatalf("invalid JSON: %v (raw: %s)", err, line)
+	}
+	if event["event"] != "run_started" {
+		t.Errorf("got event %v, want run_started", event["event"])
 	}
 }

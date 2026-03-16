@@ -41,6 +41,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/publish", internal.NewPublishHandler(broker, queue))
 	mux.HandleFunc("/commands", internal.NewCommandsHandler(queue))
+	mux.HandleFunc("/events", internal.NewEventsHandler(broker))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))

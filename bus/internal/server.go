@@ -82,3 +82,23 @@ func (s *BusServer) ExtendBudget(
 	s.Queue.Push(cmd)
 	return connect.NewResponse(&chaosv1.ExtendBudgetResponse{}), nil
 }
+
+// SubmitEvaluation queues an evaluation result for the coordinator.
+func (s *BusServer) SubmitEvaluation(
+	ctx context.Context,
+	req *connect.Request[chaosv1.SubmitEvaluationRequest],
+) (*connect.Response[chaosv1.SubmitEvaluationResponse], error) {
+	runID := req.Msg.RunId
+	if runID == "" {
+		runID = s.Queue.CurrentRun()
+	}
+	cmd, _ := json.Marshal(map[string]any{
+		"command":       "submit_evaluation",
+		"run_id":        runID,
+		"experiment_id": req.Msg.ExperimentId,
+		"score":         req.Msg.Score,
+		"note":          req.Msg.Note,
+	})
+	s.Queue.Push(cmd)
+	return connect.NewResponse(&chaosv1.SubmitEvaluationResponse{}), nil
+}

@@ -41,6 +41,9 @@ const (
 	BusServicePauseRunProcedure = "/chaos.v1.BusService/PauseRun"
 	// BusServiceExtendBudgetProcedure is the fully-qualified name of the BusService's ExtendBudget RPC.
 	BusServiceExtendBudgetProcedure = "/chaos.v1.BusService/ExtendBudget"
+	// BusServiceSubmitEvaluationProcedure is the fully-qualified name of the BusService's
+	// SubmitEvaluation RPC.
+	BusServiceSubmitEvaluationProcedure = "/chaos.v1.BusService/SubmitEvaluation"
 )
 
 // BusServiceClient is a client for the chaos.v1.BusService service.
@@ -48,6 +51,7 @@ type BusServiceClient interface {
 	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.Event], error)
 	PauseRun(context.Context, *connect.Request[v1.PauseRunRequest]) (*connect.Response[v1.PauseRunResponse], error)
 	ExtendBudget(context.Context, *connect.Request[v1.ExtendBudgetRequest]) (*connect.Response[v1.ExtendBudgetResponse], error)
+	SubmitEvaluation(context.Context, *connect.Request[v1.SubmitEvaluationRequest]) (*connect.Response[v1.SubmitEvaluationResponse], error)
 }
 
 // NewBusServiceClient constructs a client for the chaos.v1.BusService service. By default, it uses
@@ -79,14 +83,21 @@ func NewBusServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(busServiceMethods.ByName("ExtendBudget")),
 			connect.WithClientOptions(opts...),
 		),
+		submitEvaluation: connect.NewClient[v1.SubmitEvaluationRequest, v1.SubmitEvaluationResponse](
+			httpClient,
+			baseURL+BusServiceSubmitEvaluationProcedure,
+			connect.WithSchema(busServiceMethods.ByName("SubmitEvaluation")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // busServiceClient implements BusServiceClient.
 type busServiceClient struct {
-	subscribe    *connect.Client[v1.SubscribeRequest, v1.Event]
-	pauseRun     *connect.Client[v1.PauseRunRequest, v1.PauseRunResponse]
-	extendBudget *connect.Client[v1.ExtendBudgetRequest, v1.ExtendBudgetResponse]
+	subscribe        *connect.Client[v1.SubscribeRequest, v1.Event]
+	pauseRun         *connect.Client[v1.PauseRunRequest, v1.PauseRunResponse]
+	extendBudget     *connect.Client[v1.ExtendBudgetRequest, v1.ExtendBudgetResponse]
+	submitEvaluation *connect.Client[v1.SubmitEvaluationRequest, v1.SubmitEvaluationResponse]
 }
 
 // Subscribe calls chaos.v1.BusService.Subscribe.
@@ -104,11 +115,17 @@ func (c *busServiceClient) ExtendBudget(ctx context.Context, req *connect.Reques
 	return c.extendBudget.CallUnary(ctx, req)
 }
 
+// SubmitEvaluation calls chaos.v1.BusService.SubmitEvaluation.
+func (c *busServiceClient) SubmitEvaluation(ctx context.Context, req *connect.Request[v1.SubmitEvaluationRequest]) (*connect.Response[v1.SubmitEvaluationResponse], error) {
+	return c.submitEvaluation.CallUnary(ctx, req)
+}
+
 // BusServiceHandler is an implementation of the chaos.v1.BusService service.
 type BusServiceHandler interface {
 	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.Event]) error
 	PauseRun(context.Context, *connect.Request[v1.PauseRunRequest]) (*connect.Response[v1.PauseRunResponse], error)
 	ExtendBudget(context.Context, *connect.Request[v1.ExtendBudgetRequest]) (*connect.Response[v1.ExtendBudgetResponse], error)
+	SubmitEvaluation(context.Context, *connect.Request[v1.SubmitEvaluationRequest]) (*connect.Response[v1.SubmitEvaluationResponse], error)
 }
 
 // NewBusServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -136,6 +153,12 @@ func NewBusServiceHandler(svc BusServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(busServiceMethods.ByName("ExtendBudget")),
 		connect.WithHandlerOptions(opts...),
 	)
+	busServiceSubmitEvaluationHandler := connect.NewUnaryHandler(
+		BusServiceSubmitEvaluationProcedure,
+		svc.SubmitEvaluation,
+		connect.WithSchema(busServiceMethods.ByName("SubmitEvaluation")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/chaos.v1.BusService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case BusServiceSubscribeProcedure:
@@ -144,6 +167,8 @@ func NewBusServiceHandler(svc BusServiceHandler, opts ...connect.HandlerOption) 
 			busServicePauseRunHandler.ServeHTTP(w, r)
 		case BusServiceExtendBudgetProcedure:
 			busServiceExtendBudgetHandler.ServeHTTP(w, r)
+		case BusServiceSubmitEvaluationProcedure:
+			busServiceSubmitEvaluationHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -163,4 +188,8 @@ func (UnimplementedBusServiceHandler) PauseRun(context.Context, *connect.Request
 
 func (UnimplementedBusServiceHandler) ExtendBudget(context.Context, *connect.Request[v1.ExtendBudgetRequest]) (*connect.Response[v1.ExtendBudgetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("chaos.v1.BusService.ExtendBudget is not implemented"))
+}
+
+func (UnimplementedBusServiceHandler) SubmitEvaluation(context.Context, *connect.Request[v1.SubmitEvaluationRequest]) (*connect.Response[v1.SubmitEvaluationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("chaos.v1.BusService.SubmitEvaluation is not implemented"))
 }
