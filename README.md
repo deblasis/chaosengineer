@@ -147,19 +147,19 @@ The `## Baseline` section is optional for live runs (ChaosEngineer can auto-dete
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    CLI (cli.py)                      │
+│                    CLI (cli.py)                     │
 ├─────────────────────────────────────────────────────┤
-│              Coordinator (core/)                     │
-│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌──────────┐ │
-│  │ Budget   │ │ Snapshot │ │ Pause  │ │ State    │ │
-│  │ Tracker  │ │ & Resume │ │ Control│ │ Machine  │ │
-│  └──────────┘ └──────────┘ └────────┘ └──────────┘ │
+│              Coordinator (core/)                    │
+│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌──────────┐  │
+│  │ Budget   │ │ Snapshot │ │ Pause  │ │ State    │  │
+│  │ Tracker  │ │ & Resume │ │ Control│ │ Machine  │  │
+│  └──────────┘ └──────────┘ └────────┘ └──────────┘  │
 ├──────────────────┬──────────────────────────────────┤
 │  LLM Layer       │  Execution Layer                 │
-│  ┌────────────┐  │  ┌─────────────┐ ┌────────────┐ │
-│  │ Decision   │  │  │ Subagent    │ │ Worktree   │ │
-│  │ Maker      │  │  │ Executor    │ │ Manager    │ │
-│  ├────────────┤  │  ├─────────────┤ └────────────┘ │
+│  ┌────────────┐  │  ┌─────────────┐ ┌────────────┐  │
+│  │ Decision   │  │  │ Subagent    │ │ Worktree   │  │
+│  │ Maker      │  │  │ Executor    │ │ Manager    │  │
+│  ├────────────┤  │  ├─────────────┤ └────────────┘  │
 │  │ Claude Code│  │  │ Task Packet │                 │
 │  │ SDK        │  │  │ Builder     │                 │
 │  │ Scripted   │  │  │ Result      │                 │
@@ -167,16 +167,16 @@ The `## Baseline` section is optional for live runs (ChaosEngineer can auto-dete
 │                  │  └─────────────┘                 │
 ├──────────────────┴──────────────────────────────────┤
 │  Metrics & Events                                   │
-│  ┌────────────┐ ┌────────────┐ ┌─────────────────┐ │
-│  │ Event      │ │ Event      │ │ Event           │ │
-│  │ Logger     │ │ Publisher  │ │ Bridge (bus.py) │ │
-│  └────────────┘ └────────────┘ └─────────────────┘ │
+│  ┌────────────┐ ┌────────────┐ ┌─────────────────┐  │
+│  │ Event      │ │ Event      │ │ Event           │  │
+│  │ Logger     │ │ Publisher  │ │ Bridge (bus.py) │  │
+│  └────────────┘ └────────────┘ └─────────────────┘  │
 ├─────────────────────────────────────────────────────┤
 │  TUI Dashboard (Textual)                            │
-│  ┌──────────┐ ┌──────────────┐ ┌──────────────────┐│
-│  │ Budget   │ │ Experiment   │ │ Eval             ││
-│  │ Bar      │ │ Table        │ │ Gate             ││
-│  └──────────┘ └──────────────┘ └──────────────────┘│
+│  ┌──────────┐ ┌──────────────┐ ┌──────────────────┐ │
+│  │ Budget   │ │ Experiment   │ │ Eval             │ │
+│  │ Bar      │ │ Table        │ │ Gate             │ │
+│  └──────────┘ └──────────────┘ └──────────────────┘ │
 └─────────────────────────────────────────────────────┘
 ```
 
