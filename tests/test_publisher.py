@@ -140,3 +140,34 @@ class TestEventPublisher:
     def test_raises_when_no_bus_and_no_fallback(self):
         with pytest.raises(RuntimeError):
             EventPublisher(bus_url=None, fallback_path=None)
+
+
+class TestEventPublisherBridge:
+    def test_publishes_to_bridge_when_provided(self, tmp_path):
+        from chaosengineer.tui.bridge import EventBridge
+
+        bridge = EventBridge()
+        publisher = EventPublisher(bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge)
+        publisher.log(Event("run_started", data={"run_id": "r1"}))
+
+        snap = bridge.snapshot()
+        assert len(snap) == 1
+        assert snap[0]["event"] == "run_started"
+        assert snap[0]["run_id"] == "r1"
+
+    def test_bridge_receives_all_events(self, tmp_path):
+        from chaosengineer.tui.bridge import EventBridge
+
+        bridge = EventBridge()
+        publisher = EventPublisher(bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge)
+        publisher.log(Event("run_started", data={"run_id": "r1"}))
+        publisher.log(Event("iteration_started", data={"iteration": 0}))
+        publisher.log(Event("worker_completed", data={"experiment_id": "e1"}))
+
+        assert len(bridge.snapshot()) == 3
+
+    def test_no_bridge_still_works(self, tmp_path):
+        """Without bridge, publisher works exactly as before."""
+        publisher = EventPublisher(bus_url=None, fallback_path=tmp_path / "events.jsonl")
+        publisher.log(Event("run_started", data={"run_id": "r1"}))
+        assert (tmp_path / "events.jsonl").exists()

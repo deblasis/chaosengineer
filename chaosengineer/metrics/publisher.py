@@ -18,12 +18,13 @@ class EventPublisher:
     Same log(Event) interface as EventLogger — the coordinator doesn't change.
     """
 
-    def __init__(self, bus_url: str | None, fallback_path: Path | None = None):
+    def __init__(self, bus_url: str | None, fallback_path: Path | None = None, bridge: "EventBridge | None" = None):
         self._bus_url = bus_url
         self._fallback_path = fallback_path
         self._fallback: EventLogger | None = None
         self._bus_available = False
         self._run_id: str | None = None
+        self._bridge = bridge
 
         if bus_url:
             try:
@@ -53,6 +54,9 @@ class EventPublisher:
         # Include run_id on all events if known
         if "run_id" not in payload and self._run_id:
             payload["run_id"] = self._run_id
+
+        if self._bridge is not None:
+            self._bridge.publish(payload)
 
         if not self._bus_available:
             if self._fallback:
