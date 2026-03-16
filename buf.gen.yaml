@@ -1,9 +1,0 @@
-# buf.gen.yaml
-version: v2
-plugins:
-  - remote: buf.build/protocolbuffers/go
-    out: bus/gen
-    opt: paths=source_relative
-  - remote: buf.build/connectrpc/go
-    out: bus/gen
-    opt: paths=source_relative

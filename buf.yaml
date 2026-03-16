@@ -1,7 +1,0 @@
-# buf.yaml
-version: v2
-modules:
-  - path: proto
-lint:
-  except:
-    - RPC_RESPONSE_STANDARD_NAME

@@ -39,7 +39,7 @@ class TestEvalLoopIntegration:
         bridge = EventBridge()
         gate = EvaluationGate()
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         coordinator = Coordinator(
@@ -85,7 +85,7 @@ class TestEvalLoopIntegration:
         bridge = EventBridge()
         gate = EvaluationGate()
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         coordinator = Coordinator(
@@ -130,7 +130,7 @@ class TestEvalLoopIntegration:
         bridge = EventBridge()
         gate = EvaluationGate()
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         coordinator = Coordinator(
@@ -186,7 +186,7 @@ class TestEvalLoopIntegration:
         bridge = EventBridge()
         gate = EvaluationGate()
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         # Simulate bus command delivery via poll_commands

@@ -30,5 +30,3 @@ results.tsv
 # Internal development plans/specs
 docs/superpowers/
 
-# Go bus binary
-bus/chaos-bus

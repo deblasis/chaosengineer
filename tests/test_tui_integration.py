@@ -43,7 +43,7 @@ class TestCoordinatorBridgeIntegration:
 
         bridge = EventBridge()
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         coordinator = Coordinator(
@@ -81,7 +81,7 @@ class TestCoordinatorBridgeIntegration:
         view_manager_mock = type("VM", (), {"tui_active": True})()
 
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         coordinator = Coordinator(
@@ -127,7 +127,7 @@ class TestCoordinatorBridgeIntegration:
 
         bridge = EventBridge()
         publisher = EventPublisher(
-            bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge,
+            path=tmp_path / "events.jsonl", bridge=bridge,
         )
 
         coordinator = Coordinator(
