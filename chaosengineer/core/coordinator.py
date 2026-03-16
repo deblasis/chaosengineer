@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from chaosengineer.core.models import (
     Baseline,
+    BudgetConfig,
     DimensionType,
     Experiment,
     ExperimentResult,
@@ -70,6 +71,38 @@ class Coordinator:
         record = {"ts": ts, "event": event.event, **event.data}
         self._history.append(record)
 
+    def _poll_bus_commands(self) -> None:
+        """Poll message bus for remote commands (pause, extend_budget)."""
+        if not hasattr(self.logger, "poll_commands"):
+            return
+        for cmd in self.logger.poll_commands():
+            if cmd.get("command") == "pause" and self._pause_controller:
+                self._pause_controller.pause_requested = True
+            elif cmd.get("command") == "extend_budget":
+                bc = self.budget.config
+                if cmd.get("add_cost_usd"):
+                    bc = BudgetConfig(
+                        max_api_cost=(bc.max_api_cost or 0) + cmd["add_cost_usd"],
+                        max_experiments=bc.max_experiments,
+                        max_wall_time_seconds=bc.max_wall_time_seconds,
+                        max_plateau_iterations=bc.max_plateau_iterations,
+                    )
+                if cmd.get("add_experiments"):
+                    bc = BudgetConfig(
+                        max_api_cost=bc.max_api_cost,
+                        max_experiments=(bc.max_experiments or 0) + cmd["add_experiments"],
+                        max_wall_time_seconds=bc.max_wall_time_seconds,
+                        max_plateau_iterations=bc.max_plateau_iterations,
+                    )
+                if cmd.get("add_time_seconds"):
+                    bc = BudgetConfig(
+                        max_api_cost=bc.max_api_cost,
+                        max_experiments=bc.max_experiments,
+                        max_wall_time_seconds=(bc.max_wall_time_seconds or 0) + cmd["add_time_seconds"],
+                        max_plateau_iterations=bc.max_plateau_iterations,
+                    )
+                self.budget.config = bc
+
     def _discover_diverse_dimensions(self) -> None:
         """Discover options for DIVERSE dimensions before the main loop."""
         for dim in self.spec.dimensions:
@@ -129,6 +162,7 @@ class Coordinator:
         all_dimensions_exhausted = True
 
         while not self.budget.is_exhausted():
+            self._poll_bus_commands()
             # Pause check: before starting new iteration
             if self._pause_controller and self._pause_controller.pause_requested and self._pause_controller.should_show_menu():
                 choice = self._pause_controller.show_post_iteration_menu()
@@ -221,6 +255,7 @@ class Coordinator:
                         self._iteration - 1, self.best_baseline.metric_value,
                     )
 
+                self._poll_bus_commands()
                 # Pause check: auto-pause after kill
                 if self._pause_controller and self._pause_controller.kill_issued:
                     self._log_user_pause(active_baselines)
