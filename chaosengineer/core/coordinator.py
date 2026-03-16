@@ -79,27 +79,6 @@ class Coordinator:
         record = {"ts": ts, "event": event.event, **event.data}
         self._history.append(record)
 
-    def _poll_bus_commands(self) -> None:
-        """Poll message bus for remote commands (pause, extend_budget, submit_evaluation)."""
-        if not hasattr(self.logger, "poll_commands"):
-            return
-        for cmd in self.logger.poll_commands():
-            if cmd.get("command") == "pause" and self._pause_controller:
-                self._pause_controller.pause_requested = True
-            elif cmd.get("command") == "extend_budget":
-                self.extend_budget(
-                    add_cost=cmd.get("add_cost_usd", 0),
-                    add_experiments=cmd.get("add_experiments", 0),
-                    add_time=cmd.get("add_time_seconds", 0),
-                )
-            elif cmd.get("command") == "submit_evaluation" and self._eval_gate:
-                score = cmd.get("score")
-                note = cmd.get("note", "")
-                if score is not None:
-                    self._eval_gate.submit_evaluation(float(score), note)
-                else:
-                    self._eval_gate.skip_evaluation()
-
     def _request_human_evaluation(self, exp: Experiment, result: ExperimentResult) -> float | None:
         """Block for human evaluation score. Returns score or None if skipped."""
         if self._eval_gate is None:
@@ -206,7 +185,6 @@ class Coordinator:
         all_dimensions_exhausted = True
 
         while not self.budget.is_exhausted():
-            self._poll_bus_commands()
             # Pause check: before starting new iteration
             if self._pause_controller and self._pause_controller.pause_requested and self._pause_controller.should_show_menu():
                 if self._view_manager and self._view_manager.tui_active and self._pause_gate:
@@ -306,7 +284,6 @@ class Coordinator:
                         self._iteration - 1, self.best_baseline.metric_value,
                     )
 
-                self._poll_bus_commands()
                 # Pause check: auto-pause after kill
                 if self._pause_controller and self._pause_controller.kill_issued:
                     self._log_user_pause(active_baselines)
