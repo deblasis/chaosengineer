@@ -673,6 +673,28 @@ if self._pause_controller and self._pause_controller.pause_requested and self._p
         self._pause_controller.reset()
 ```
 
+Also modify the mid-iteration callback in `_run_iteration` (lines 476-488) to use PauseGate when TUI is active:
+
+```python
+if (self._pause_controller
+        and self._pause_controller.pause_requested
+        and not self._pause_controller.kill_issued
+        and completed < total):
+    if self._view_manager and self._view_manager.tui_active and self._pause_gate:
+        # TUI handles pause decisions — don't show interactive menu
+        pass  # TUI user will press P or let it continue
+    else:
+        choice = self._pause_controller.show_mid_iteration_menu(completed, total)
+        if choice == "kill":
+            self._pause_controller.kill_issued = True
+            self.executor.kill_active()
+        elif choice == "wait":
+            self._pause_controller.wait_then_ask = True
+            self._pause_controller.pause_requested = False
+        elif choice == "continue":
+            self._pause_controller.reset()
+```
+
 Apply the same pattern to the post-iteration pause check (lines 264-273):
 
 ```python
@@ -793,13 +815,22 @@ git commit -m "feat(tui): wire EventBridge into EventPublisher"
 - Create: `chaosengineer/tui/app.py`
 - Create: `tests/test_tui_app.py`
 
+- [ ] **Step 0: Add pytest-asyncio dependency**
+
+Add `"pytest-asyncio>=0.23"` to the `[project.optional-dependencies]` test group in `pyproject.toml` (or `[dependency-groups]` dev group, whichever the project uses). Run `uv lock && uv sync`.
+
+Also add to `pyproject.toml`:
+```toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+```
+
 - [ ] **Step 1: Write Textual snapshot test for initial empty state**
 
 Create `tests/test_tui_app.py`:
 
 ```python
 """Tests for the ChaosEngineer TUI app."""
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -883,8 +914,8 @@ class BudgetBar(Static):
     }
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._cost = 0.0
         self._max_cost = None
         self._experiments = 0
@@ -945,6 +976,7 @@ class ChaosApp(App):
         ("e", "extend", "Extend Budget"),
         ("q", "quit_tui", "Quit TUI"),
         ("escape", "quit_tui", "Quit TUI"),
+        ("ctrl+c", "pause", "Pause"),
     ]
 
     def __init__(self, bridge: "EventBridge", pause_gate: "PauseGate",
@@ -966,12 +998,13 @@ class ChaosApp(App):
         table = self.query_one("#experiment-table", DataTable)
         table.add_columns("#", "Worker", "Dimension", "Status", "Cost", "Delta")
 
-        # Subscribe to bridge and start consuming
-        self._event_queue = self._bridge.subscribe()
-
-        # Replay history
+        # Replay history FIRST, then subscribe for live events.
+        # This order prevents duplicates: snapshot returns history up to now,
+        # subscribe starts delivering only new events after this point.
         for event in self._bridge.snapshot():
             self._handle_event(event)
+
+        self._event_queue = self._bridge.subscribe()
 
         # Start live consumer
         self.set_interval(0.1, self._poll_events)
@@ -1060,11 +1093,17 @@ class ChaosApp(App):
 
     def _on_budget_checkpoint(self, event: dict) -> None:
         bar = self.query_one("#budget-bar", BudgetBar)
+        spent = event.get("spent_usd", 0)
+        remaining_cost = event.get("remaining_cost")
+        max_cost = (spent + remaining_cost) if remaining_cost is not None else None
+        exp_run = event.get("experiments_run", 0)
+        remaining_exp = event.get("remaining_experiments")
+        max_exp = (exp_run + remaining_exp) if remaining_exp is not None else None
         bar.update_budget(
-            cost=event.get("spent_usd", 0),
-            max_cost=event.get("remaining_cost"),
-            experiments=event.get("experiments_run", 0),
-            max_experiments=event.get("remaining_experiments"),
+            cost=spent,
+            max_cost=max_cost,
+            experiments=exp_run,
+            max_experiments=max_exp,
             elapsed=self._format_elapsed(event.get("elapsed_seconds", 0)),
         )
 
@@ -1324,19 +1363,35 @@ class ViewManager:
 
     def run(self, coord_done: threading.Event) -> None:
         """Main loop. Runs on the main thread. Blocks until coordinator finishes."""
+        import tty
+        import termios
+
         self._coord_done = coord_done
         print("Press 't' to open TUI dashboard", file=sys.stderr)
 
-        while not self._coord_done.is_set():
-            if self._coord_done.wait(timeout=0.2):
-                break
-            if self._check_stdin_for_toggle():
-                self._enter_tui()
+        if not sys.stdin.isatty():
+            # No terminal — just wait for coordinator to finish
+            coord_done.wait()
+            return
+
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)  # cbreak mode: single-char input, SIGINT preserved
+            while not self._coord_done.is_set():
+                if self._coord_done.wait(timeout=0.2):
+                    break
+                if self._check_stdin_for_toggle():
+                    # Restore terminal before entering TUI (Textual manages its own)
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    self._enter_tui()
+                    # Re-enter cbreak after TUI exits
+                    tty.setcbreak(fd)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     def _check_stdin_for_toggle(self) -> bool:
-        """Check if 't' was pressed on stdin. Uses cbreak mode."""
-        if not sys.stdin.isatty():
-            return False
+        """Check if 't' was pressed on stdin. Terminal must be in cbreak mode."""
         try:
             import select
             ready, _, _ = select.select([sys.stdin], [], [], 0)
@@ -1469,7 +1524,7 @@ if getattr(args, "tui", False):
     logger = EventPublisher(bus_url=bus_url, fallback_path=log_path, bridge=bridge)
 ```
 
-Modify the `Coordinator(...)` constructor call to include the new optional parameters:
+The `Coordinator(...)` constructor call does NOT receive view_manager/pause_gate yet (circular dependency — ViewManager needs coordinator reference). Create coordinator first, then wire back:
 
 ```python
 coordinator = Coordinator(
@@ -1482,8 +1537,6 @@ coordinator = Coordinator(
     run_id=run_id,
     pause_controller=pause_controller,
     status_display=status_display,
-    view_manager=view_manager if getattr(args, "tui", False) else None,
-    pause_gate=pause_gate if getattr(args, "tui", False) else None,
 )
 ```
 
@@ -1493,8 +1546,13 @@ Replace the `coordinator.run()` call and surrounding try/finally (lines 352-358)
 pause_controller.install()
 try:
     if getattr(args, "tui", False):
+        import threading
         view_manager = ViewManager(bridge, pause_gate, pause_controller,
                                     coordinator, status_display)
+        # Wire back into coordinator (breaking circular dependency)
+        coordinator._view_manager = view_manager
+        coordinator._pause_gate = pause_gate
+
         coord_done = threading.Event()
 
         def run_coordinator():
@@ -1515,14 +1573,59 @@ finally:
         bus_proc.terminate()
 ```
 
-Add `import threading` to the imports at the top of the function if not already present.
-
 - [ ] **Step 6: Apply same wiring to _execute_resume**
 
-Mirror the same pattern in `_execute_resume()`:
-- After creating `logger`, check `args.tui` and create bridge/pause_gate/re-create publisher with bridge
-- Pass `view_manager` and `pause_gate` to Coordinator
-- Replace `coordinator.resume_from_snapshot()` call with threaded version when `--tui` is set
+In `_execute_resume()`, apply the same pattern:
+
+After creating `logger` (line 481), add:
+
+```python
+if getattr(args, "tui", False):
+    from chaosengineer.tui.bridge import EventBridge
+    from chaosengineer.tui.pause_gate import PauseGate
+    bridge = EventBridge()
+    pause_gate = PauseGate()
+    logger = EventPublisher(bus_url=bus_url, fallback_path=events_path, bridge=bridge)
+```
+
+The coordinator is created as normal. Replace the `coordinator.resume_from_snapshot()` call and try/finally (lines 508-517) with:
+
+```python
+pause_controller.install()
+try:
+    if getattr(args, "tui", False):
+        import threading
+        from chaosengineer.tui.views import ViewManager
+        view_manager = ViewManager(bridge, pause_gate, pause_controller,
+                                    coordinator, status_display)
+        coordinator._view_manager = view_manager
+        coordinator._pause_gate = pause_gate
+
+        coord_done = threading.Event()
+
+        def run_coordinator():
+            try:
+                coordinator.resume_from_snapshot(
+                    snapshot, restart_iteration=args.restart_iteration,
+                    budget_extensions=extensions or None,
+                )
+            finally:
+                coord_done.set()
+
+        coord_thread = threading.Thread(target=run_coordinator, daemon=True)
+        coord_thread.start()
+        view_manager.run(coord_done)
+        coord_thread.join()
+    else:
+        coordinator.resume_from_snapshot(
+            snapshot, restart_iteration=args.restart_iteration,
+            budget_extensions=extensions or None,
+        )
+finally:
+    pause_controller.uninstall()
+    if bus_proc:
+        bus_proc.terminate()
+```
 
 - [ ] **Step 7: Run full test suite**
 
