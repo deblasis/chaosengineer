@@ -322,6 +322,12 @@ def _execute_run(args):
         logger = EventPublisher(bus_url=bus_url, fallback_path=log_path, bridge=bridge)
     budget = BudgetTracker(spec.budget)
 
+    # Create eval_gate for human evaluation
+    eval_gate = None
+    if spec.evaluation_type == "human":
+        from chaosengineer.tui.eval_gate import EvaluationGate
+        eval_gate = EvaluationGate()
+
     # Resolve initial baseline: CLI flag > workload spec > auto-detect
     if args.initial_baseline is not None:
         metric_value = args.initial_baseline
@@ -360,6 +366,7 @@ def _execute_run(args):
         run_id=run_id,
         pause_controller=pause_controller,
         status_display=status_display,
+        eval_gate=eval_gate,
     )
 
     print(f"Starting run: {spec.name}")
@@ -373,7 +380,8 @@ def _execute_run(args):
             import threading
             from chaosengineer.tui.views import ViewManager
             view_manager = ViewManager(bridge, pause_gate, pause_controller,
-                                        coordinator, status_display)
+                                        coordinator, status_display,
+                                        eval_gate=eval_gate)
             coordinator._view_manager = view_manager
             coordinator._pause_gate = pause_gate
 
@@ -525,6 +533,12 @@ def _execute_resume(args):
         pause_gate = PauseGate()
         logger = EventPublisher(bus_url=bus_url, fallback_path=events_path, bridge=bridge)
 
+    # Create eval_gate for human evaluation
+    eval_gate = None
+    if spec.evaluation_type == "human":
+        from chaosengineer.tui.eval_gate import EvaluationGate
+        eval_gate = EvaluationGate()
+
     from chaosengineer.core.pause import PauseController
     from chaosengineer.core.status import StatusDisplay
 
@@ -542,6 +556,7 @@ def _execute_resume(args):
         run_id=snapshot.run_id,
         pause_controller=pause_controller,
         status_display=status_display,
+        eval_gate=eval_gate,
     )
     extensions = {}
     if args.add_cost > 0:
@@ -556,7 +571,8 @@ def _execute_resume(args):
             import threading
             from chaosengineer.tui.views import ViewManager
             view_manager = ViewManager(bridge, pause_gate, pause_controller,
-                                        coordinator, status_display)
+                                        coordinator, status_display,
+                                        eval_gate=eval_gate)
             coordinator._view_manager = view_manager
             coordinator._pause_gate = pause_gate
 

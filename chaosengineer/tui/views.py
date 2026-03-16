@@ -26,12 +26,14 @@ class ViewManager:
         pause_controller: "PauseController",
         coordinator: "Coordinator",
         status_display: "StatusDisplay",
+        eval_gate=None,
     ):
         self._bridge = bridge
         self._pause_gate = pause_gate
         self._pause_controller = pause_controller
         self._coordinator = coordinator
         self._status_display = status_display
+        self._eval_gate = eval_gate
         self.tui_active: bool = False
         self._coord_done = threading.Event()
         self._last_toggle: float = 0
@@ -94,6 +96,7 @@ class ViewManager:
             pause_gate=self._pause_gate,
             coordinator=self._coordinator,
             pause_controller=self._pause_controller,
+            eval_gate=self._eval_gate,
         )
         try:
             app.run()

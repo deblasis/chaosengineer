@@ -48,6 +48,7 @@ class Coordinator:
         status_display: "StatusDisplay | None" = None,
         view_manager: "ViewManager | None" = None,
         pause_gate: "PauseGate | None" = None,
+        eval_gate: "EvaluationGate | None" = None,
     ):
         self.spec = spec
         self.decision_maker = decision_maker
@@ -68,6 +69,7 @@ class Coordinator:
         self._status_display = status_display
         self._view_manager = view_manager
         self._pause_gate = pause_gate
+        self._eval_gate = eval_gate
         self._budget_lock = threading.Lock()
 
     def _log(self, event: Event) -> None:
@@ -90,6 +92,41 @@ class Coordinator:
                     add_experiments=cmd.get("add_experiments", 0),
                     add_time=cmd.get("add_time_seconds", 0),
                 )
+
+    def _request_human_evaluation(self, exp: Experiment, result: ExperimentResult) -> float | None:
+        """Block for human evaluation score. Returns score or None if skipped."""
+        if self._eval_gate is None:
+            self._log(Event(
+                event="evaluation_skipped",
+                data={
+                    "experiment_id": exp.experiment_id,
+                    "reason": "no_eval_gate",
+                },
+            ))
+            return None
+
+        details = {
+            "experiment_id": exp.experiment_id,
+            "dimension": exp.dimension,
+            "params": exp.params,
+        }
+        self._log(Event(
+            event="evaluation_requested",
+            data=details,
+        ))
+
+        score, note = self._eval_gate.request_evaluation(exp.experiment_id, details)
+
+        if score is not None:
+            self._log(Event(
+                event="evaluation_submitted",
+                data={
+                    "experiment_id": exp.experiment_id,
+                    "score": score,
+                    "note": note,
+                },
+            ))
+        return score
 
     def extend_budget(self, add_cost: float = 0, add_experiments: int = 0,
                       add_time: float = 0) -> None:
@@ -524,6 +561,28 @@ class Coordinator:
                     },
                 ))
             else:
+                # Human evaluation override
+                if self.spec.evaluation_type == "human":
+                    score = self._request_human_evaluation(exp, result)
+                    if score is None:
+                        fail_experiment(exp, result)
+                        self._log(Event(
+                            event="worker_failed",
+                            data={
+                                "experiment_id": exp.experiment_id,
+                                "error": "human_evaluation_skipped",
+                                "dimension": exp.dimension,
+                                "params": exp.params,
+                                "cost_usd": result.cost_usd,
+                            },
+                        ))
+                        release_worker(worker)
+                        self.budget.record_experiment()
+                        self.budget.add_cost(result.cost_usd)
+                        results.append((exp, result))
+                        continue
+                    result.primary_metric = score
+
                 complete_experiment(exp, result)
                 self._log(Event(
                     event="worker_completed",
