@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -77,11 +76,6 @@ def _build_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--tui", action="store_true", default=False,
                                help="Enable TUI dashboard (toggle with 't' during run)")
 
-    # Monitor command: attach to a running bus
-    monitor_parser = subparsers.add_parser("monitor", help="Monitor a running experiment via bus")
-    monitor_parser.add_argument("bus_url", help="URL of the chaos-bus (e.g., http://127.0.0.1:50051)")
-    monitor_parser.add_argument("--run-id", default="", help="Specific run to monitor")
-
     # Version
     subparsers.add_parser("version", help="Print version")
 
@@ -114,9 +108,6 @@ def main():
                 if not result.passed:
                     all_passed = False
             sys.exit(0 if all_passed else 1)
-
-    elif args.command == "monitor":
-        _execute_monitor(args)
 
     elif args.command == "run":
         _execute_run(args)
@@ -184,61 +175,6 @@ def _check_resumable_session(output_dir: Path) -> dict | None:
     if run_info and not is_completed:
         return run_info
     return None
-
-
-def _find_bus_binary() -> Path | None:
-    """Locate the chaos-bus binary: env var > repo path > system PATH."""
-    import shutil
-    env_path = os.environ.get("CHAOS_BUS_BIN")
-    if env_path and Path(env_path).is_file():
-        return Path(env_path)
-    # Development: relative to repo root (cli.py is in chaosengineer/)
-    repo_root = Path(__file__).parent.parent
-    dev_path = repo_root / "bus" / "chaos-bus"
-    if dev_path.is_file():
-        return dev_path
-    found = shutil.which("chaos-bus")
-    if found:
-        return Path(found)
-    return None
-
-
-def _start_bus(output_file: Path) -> tuple[subprocess.Popen | None, str | None]:
-    """Start the bus binary and return (process, bus_url) or (None, None)."""
-    binary = _find_bus_binary()
-    if binary is None:
-        return None, None
-
-    proc = subprocess.Popen(
-        [str(binary), "--port", "0", "--output-file", str(output_file),
-         "--shutdown-delay", "5s"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        port_line = proc.stdout.readline()
-        if not port_line:
-            proc.kill()
-            return None, None
-        port_data = json.loads(port_line)
-        bus_url = f"http://127.0.0.1:{port_data['port']}"
-
-        # Poll healthz until ready (up to 5 seconds)
-        import urllib.request
-        import time
-        deadline = time.time() + 5.0
-        while time.time() < deadline:
-            try:
-                urllib.request.urlopen(f"{bus_url}/healthz", timeout=1)
-                return proc, bus_url
-            except Exception:
-                time.sleep(0.1)
-
-        proc.kill()
-        return None, None
-    except Exception:
-        proc.kill()
-        return None, None
 
 
 def _execute_run(args):
@@ -311,15 +247,13 @@ def _execute_run(args):
         run_id=run_id,
     )
     from chaosengineer.metrics.publisher import EventPublisher
+    from chaosengineer.bus import EventBridge
     log_path = args.output_dir / "events.jsonl"
-    bus_proc, bus_url = _start_bus(log_path)
-    logger = EventPublisher(bus_url=bus_url, fallback_path=log_path)
+    bridge = EventBridge()
+    logger = EventPublisher(path=log_path, bridge=bridge)
     if getattr(args, "tui", False):
-        from chaosengineer.bus import EventBridge
         from chaosengineer.tui.pause_gate import PauseGate
-        bridge = EventBridge()
         pause_gate = PauseGate()
-        logger = EventPublisher(bus_url=bus_url, fallback_path=log_path, bridge=bridge)
     budget = BudgetTracker(spec.budget)
 
     # Create eval_gate for human evaluation
@@ -401,8 +335,6 @@ def _execute_run(args):
             coordinator.run()
     finally:
         pause_controller.uninstall()
-        if bus_proc:
-            bus_proc.terminate()
 
     print(f"\nRun complete:")
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")
@@ -524,14 +456,12 @@ def _execute_resume(args):
         run_id=snapshot.run_id,
     )
     from chaosengineer.metrics.publisher import EventPublisher
-    bus_proc, bus_url = _start_bus(events_path)
-    logger = EventPublisher(bus_url=bus_url, fallback_path=events_path)
+    from chaosengineer.bus import EventBridge
+    bridge = EventBridge()
+    logger = EventPublisher(path=events_path, bridge=bridge)
     if getattr(args, "tui", False):
-        from chaosengineer.bus import EventBridge
         from chaosengineer.tui.pause_gate import PauseGate
-        bridge = EventBridge()
         pause_gate = PauseGate()
-        logger = EventPublisher(bus_url=bus_url, fallback_path=events_path, bridge=bridge)
 
     # Create eval_gate for human evaluation
     eval_gate = None
@@ -598,8 +528,6 @@ def _execute_resume(args):
             )
     finally:
         pause_controller.uninstall()
-        if bus_proc:
-            bus_proc.terminate()
 
     print(f"\nRun complete:")
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")
@@ -615,36 +543,6 @@ def _print_scenario_result(result):
     if result.errors:
         for error in result.errors:
             print(f"  ERROR: {error}")
-
-
-def _execute_monitor(args):
-    """Attach to a running chaos-bus and display a read-only TUI dashboard."""
-    from unittest.mock import MagicMock
-
-    from chaosengineer.tui.monitor import MonitorClient
-    from chaosengineer.tui.app import ChaosApp
-    from chaosengineer.tui.pause_gate import PauseGate
-
-    client = MonitorClient(bus_url=args.bus_url, run_id=args.run_id)
-    client.start()
-
-    # Create stub objects -- the TUI is read-only so these are never used.
-    pause_gate = PauseGate()
-    stub_coordinator = MagicMock()
-    stub_pause_controller = MagicMock()
-    stub_pause_controller.pause_requested = False
-
-    app = ChaosApp(
-        bridge=client.bridge,
-        pause_gate=pause_gate,
-        coordinator=stub_coordinator,
-        pause_controller=stub_pause_controller,
-        readonly=True,
-    )
-    try:
-        app.run()
-    finally:
-        client.stop()
 
 
 if __name__ == "__main__":
