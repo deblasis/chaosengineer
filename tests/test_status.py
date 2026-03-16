@@ -64,3 +64,28 @@ class TestStatusFormatting:
             sd.on_run_start(BudgetConfig(max_experiments=10))
         output = buf.getvalue()
         assert "max_experiments=10" in output
+
+
+class TestStatusDisplaySuppression:
+    def test_on_worker_done_suppressed(self, capsys):
+        from chaosengineer.core.status import StatusDisplay
+        from chaosengineer.core.models import BudgetConfig, ExperimentResult
+        from chaosengineer.core.interfaces import ExperimentTask
+
+        sd = StatusDisplay()
+        sd.suppressed = True
+        sd.on_run_start(BudgetConfig(max_experiments=10))
+        task = ExperimentTask("e1", {"lr": 0.01}, "echo 1", "HEAD")
+        result = ExperimentResult(primary_metric=1.0, cost_usd=0.5)
+        sd.on_worker_done(task, result, 1, 2)
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    def test_on_iteration_done_suppressed(self, capsys):
+        from chaosengineer.core.status import StatusDisplay
+
+        sd = StatusDisplay()
+        sd.suppressed = True
+        sd.on_iteration_done(0, 1.5)
+        captured = capsys.readouterr()
+        assert captured.err == ""

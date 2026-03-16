@@ -18,8 +18,11 @@ class StatusDisplay:
         self._iteration: int = 0
         self._cost: float = 0.0
         self._start_time: float | None = None
+        self.suppressed: bool = False
 
     def on_run_start(self, budget_config: "BudgetConfig") -> None:
+        if self.suppressed:
+            return
         self._start_time = time.monotonic()
         parts = []
         if budget_config.max_experiments is not None:
@@ -38,6 +41,8 @@ class StatusDisplay:
         completed: int,
         total: int,
     ) -> None:
+        if self.suppressed:
+            return
         self._cost += getattr(result, "cost_usd", 0.0) or 0.0
         elapsed = self._elapsed()
         line = self._format_progress(
@@ -50,6 +55,8 @@ class StatusDisplay:
         print(f"\r{line}", end="", file=sys.stderr)
 
     def on_iteration_done(self, iteration: int, best_metric: float) -> None:
+        if self.suppressed:
+            return
         self._iteration = iteration + 1
         elapsed = self._elapsed()
         line = self._format_progress(
