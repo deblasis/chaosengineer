@@ -52,6 +52,8 @@ def _build_parser() -> argparse.ArgumentParser:
                             help="Override initial baseline metric value")
     run_parser.add_argument("--force-fresh", action="store_true",
                             help="Skip run guard prompt, start fresh even if resumable session exists")
+    run_parser.add_argument("--tui", action="store_true", default=False,
+                            help="Enable TUI dashboard (toggle with 't' during run)")
 
     # Resume command
     resume_parser = subparsers.add_parser("resume", help="Resume a partially-completed run")
@@ -72,6 +74,8 @@ def _build_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--add-time", type=float, default=0, help="Add seconds to time budget")
     resume_parser.add_argument("--restart-iteration", action="store_true",
                                help="Discard partial iteration, restart from scratch")
+    resume_parser.add_argument("--tui", action="store_true", default=False,
+                               help="Enable TUI dashboard (toggle with 't' during run)")
 
     # Version
     subparsers.add_parser("version", help="Print version")
@@ -302,6 +306,12 @@ def _execute_run(args):
     log_path = args.output_dir / "events.jsonl"
     bus_proc, bus_url = _start_bus(log_path)
     logger = EventPublisher(bus_url=bus_url, fallback_path=log_path)
+    if getattr(args, "tui", False):
+        from chaosengineer.tui.bridge import EventBridge
+        from chaosengineer.tui.pause_gate import PauseGate
+        bridge = EventBridge()
+        pause_gate = PauseGate()
+        logger = EventPublisher(bus_url=bus_url, fallback_path=log_path, bridge=bridge)
     budget = BudgetTracker(spec.budget)
 
     # Resolve initial baseline: CLI flag > workload spec > auto-detect
@@ -351,7 +361,28 @@ def _execute_run(args):
 
     pause_controller.install()
     try:
-        coordinator.run()
+        if getattr(args, "tui", False):
+            import threading
+            from chaosengineer.tui.views import ViewManager
+            view_manager = ViewManager(bridge, pause_gate, pause_controller,
+                                        coordinator, status_display)
+            coordinator._view_manager = view_manager
+            coordinator._pause_gate = pause_gate
+
+            coord_done = threading.Event()
+
+            def run_coordinator():
+                try:
+                    coordinator.run()
+                finally:
+                    coord_done.set()
+
+            coord_thread = threading.Thread(target=run_coordinator, daemon=True)
+            coord_thread.start()
+            view_manager.run(coord_done)
+            coord_thread.join()
+        else:
+            coordinator.run()
     finally:
         pause_controller.uninstall()
         if bus_proc:
@@ -479,6 +510,12 @@ def _execute_resume(args):
     from chaosengineer.metrics.publisher import EventPublisher
     bus_proc, bus_url = _start_bus(events_path)
     logger = EventPublisher(bus_url=bus_url, fallback_path=events_path)
+    if getattr(args, "tui", False):
+        from chaosengineer.tui.bridge import EventBridge
+        from chaosengineer.tui.pause_gate import PauseGate
+        bridge = EventBridge()
+        pause_gate = PauseGate()
+        logger = EventPublisher(bus_url=bus_url, fallback_path=events_path, bridge=bridge)
 
     from chaosengineer.core.pause import PauseController
     from chaosengineer.core.status import StatusDisplay
@@ -507,10 +544,34 @@ def _execute_resume(args):
         extensions["add_time"] = args.add_time
     pause_controller.install()
     try:
-        coordinator.resume_from_snapshot(
-            snapshot, restart_iteration=args.restart_iteration,
-            budget_extensions=extensions or None,
-        )
+        if getattr(args, "tui", False):
+            import threading
+            from chaosengineer.tui.views import ViewManager
+            view_manager = ViewManager(bridge, pause_gate, pause_controller,
+                                        coordinator, status_display)
+            coordinator._view_manager = view_manager
+            coordinator._pause_gate = pause_gate
+
+            coord_done = threading.Event()
+
+            def run_coordinator():
+                try:
+                    coordinator.resume_from_snapshot(
+                        snapshot, restart_iteration=args.restart_iteration,
+                        budget_extensions=extensions or None,
+                    )
+                finally:
+                    coord_done.set()
+
+            coord_thread = threading.Thread(target=run_coordinator, daemon=True)
+            coord_thread.start()
+            view_manager.run(coord_done)
+            coord_thread.join()
+        else:
+            coordinator.resume_from_snapshot(
+                snapshot, restart_iteration=args.restart_iteration,
+                budget_extensions=extensions or None,
+            )
     finally:
         pause_controller.uninstall()
         if bus_proc:

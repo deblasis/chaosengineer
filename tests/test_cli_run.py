@@ -174,3 +174,23 @@ class TestPauseControllerWiring:
         assert hasattr(pc, "install")
         assert hasattr(pc, "uninstall")
         assert hasattr(sd, "on_run_start")
+
+
+class TestTuiFlag:
+    def test_run_parser_accepts_tui_flag(self):
+        from chaosengineer.cli import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(["run", "workload.md", "--tui"])
+        assert args.tui is True
+
+    def test_run_parser_defaults_tui_false(self):
+        from chaosengineer.cli import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(["run", "workload.md"])
+        assert args.tui is False
+
+    def test_resume_parser_accepts_tui_flag(self):
+        from chaosengineer.cli import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(["resume", "output/", "workload.md", "--tui"])
+        assert args.tui is True
