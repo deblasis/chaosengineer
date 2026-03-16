@@ -23,3 +23,6 @@ dev/
 # Results file
 results.tsv
 .superpowers/
+
+# Go bus binary
+bus/chaos-bus
