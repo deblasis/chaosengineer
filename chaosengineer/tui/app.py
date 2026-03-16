@@ -177,13 +177,15 @@ class ChaosApp(App):
 
     def __init__(self, bridge: "EventBridge", pause_gate: "PauseGate",
                  coordinator, pause_controller: "PauseController",
-                 eval_gate: "EvaluationGate | None" = None):
+                 eval_gate: "EvaluationGate | None" = None,
+                 readonly: bool = False):
         super().__init__()
         self._bridge = bridge
         self._pause_gate = pause_gate
         self._coordinator = coordinator
         self._pause_controller = pause_controller
         self._eval_gate: "EvaluationGate | None" = eval_gate
+        self._readonly = readonly
         self._event_queue: "_queue_mod.Queue | None" = None
         # Iteration tracking for collapsible groups
         self._current_iteration: int | None = None
@@ -196,7 +198,10 @@ class ChaosApp(App):
         yield BudgetBar(id="budget-bar")
         yield DataTable(id="experiment-table")
         yield RichLog(id="event-log", highlight=True, markup=True)
-        yield Static("[P]ause  [E]xtend budget  [X] Expand/Collapse  [Q]uit TUI", id="command-bar")
+        if self._readonly:
+            yield Static("[Q]uit  (read-only monitor)", id="command-bar")
+        else:
+            yield Static("[P]ause  [E]xtend budget  [X] Expand/Collapse  [Q]uit TUI", id="command-bar")
 
     def on_mount(self) -> None:
         table = self.query_one("#experiment-table", DataTable)
@@ -493,6 +498,10 @@ class ChaosApp(App):
 
     def action_pause(self) -> None:
         """Handle P key — pause the coordinator."""
+        if self._readonly:
+            log = self.query_one("#event-log", RichLog)
+            log.write("[dim]Monitor mode: pause not available[/dim]")
+            return
         self._pause_controller.pause_requested = True
         if self._pause_gate.decision_needed.is_set():
             self._pause_gate.submit_decision("pause")
@@ -501,13 +510,17 @@ class ChaosApp(App):
 
     def action_extend(self) -> None:
         """Handle E key — extend budget. For now, fixed increment."""
+        if self._readonly:
+            log = self.query_one("#event-log", RichLog)
+            log.write("[dim]Monitor mode: extend not available[/dim]")
+            return
         self._coordinator.extend_budget(add_cost=5.0, add_experiments=5)
         log = self.query_one("#event-log", RichLog)
         log.write("[green]Budget extended: +$5.00, +5 experiments[/green]")
 
     def action_quit_tui(self) -> None:
         """Handle Q/Esc — exit TUI mode."""
-        if self._pause_gate.decision_needed.is_set():
+        if not self._readonly and self._pause_gate.decision_needed.is_set():
             self._pause_gate.submit_decision("continue")
         if self._event_queue is not None:
             self._bridge.unsubscribe(self._event_queue)

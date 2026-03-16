@@ -77,6 +77,11 @@ def _build_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--tui", action="store_true", default=False,
                                help="Enable TUI dashboard (toggle with 't' during run)")
 
+    # Monitor command: attach to a running bus
+    monitor_parser = subparsers.add_parser("monitor", help="Monitor a running experiment via bus")
+    monitor_parser.add_argument("bus_url", help="URL of the chaos-bus (e.g., http://127.0.0.1:50051)")
+    monitor_parser.add_argument("--run-id", default="", help="Specific run to monitor")
+
     # Version
     subparsers.add_parser("version", help="Print version")
 
@@ -109,6 +114,9 @@ def main():
                 if not result.passed:
                     all_passed = False
             sys.exit(0 if all_passed else 1)
+
+    elif args.command == "monitor":
+        _execute_monitor(args)
 
     elif args.command == "run":
         _execute_run(args)
@@ -591,6 +599,36 @@ def _print_scenario_result(result):
     if result.errors:
         for error in result.errors:
             print(f"  ERROR: {error}")
+
+
+def _execute_monitor(args):
+    """Attach to a running chaos-bus and display a read-only TUI dashboard."""
+    from unittest.mock import MagicMock
+
+    from chaosengineer.tui.monitor import MonitorClient
+    from chaosengineer.tui.app import ChaosApp
+    from chaosengineer.tui.pause_gate import PauseGate
+
+    client = MonitorClient(bus_url=args.bus_url, run_id=args.run_id)
+    client.start()
+
+    # Create stub objects -- the TUI is read-only so these are never used.
+    pause_gate = PauseGate()
+    stub_coordinator = MagicMock()
+    stub_pause_controller = MagicMock()
+    stub_pause_controller.pause_requested = False
+
+    app = ChaosApp(
+        bridge=client.bridge,
+        pause_gate=pause_gate,
+        coordinator=stub_coordinator,
+        pause_controller=stub_pause_controller,
+        readonly=True,
+    )
+    try:
+        app.run()
+    finally:
+        client.stop()
 
 
 if __name__ == "__main__":
