@@ -177,8 +177,8 @@ class TestEvalLoopIntegration:
         assert len(req_events) == 2
         assert len(sub_events) == 2
 
-    def test_bus_command_submits_evaluation(self, tmp_path):
-        """submit_evaluation bus command flows through coordinator to eval_gate."""
+    def test_threaded_evaluation_submit(self, tmp_path):
+        """Background thread submits evaluation score through eval_gate."""
         spec = _make_spec()
         plans = [DimensionPlan("lr", [{"lr": 0.01}])]
         results = {"exp-0-0": ExperimentResult(primary_metric=0.5, cost_usd=0.1)}
@@ -188,20 +188,6 @@ class TestEvalLoopIntegration:
         publisher = EventPublisher(
             path=tmp_path / "events.jsonl", bridge=bridge,
         )
-
-        # Simulate bus command delivery via poll_commands
-        commands_delivered = False
-
-        original_poll = publisher.poll_commands if hasattr(publisher, 'poll_commands') else None
-
-        def mock_poll_commands():
-            nonlocal commands_delivered
-            if gate.evaluation_needed.is_set() and not commands_delivered:
-                commands_delivered = True
-                return [{"command": "submit_evaluation", "score": 0.88, "note": "via bus"}]
-            return []
-
-        publisher.poll_commands = mock_poll_commands
 
         coordinator = Coordinator(
             spec=spec,
@@ -213,19 +199,11 @@ class TestEvalLoopIntegration:
             eval_gate=gate,
         )
 
-        # The coordinator polls bus commands in its loop, which should unblock the gate
-        # But _poll_bus_commands runs at loop start, not while blocked on gate.
-        # So we need a separate thread to submit via the gate directly for this path.
-        # The bus command path is: coordinator polls → finds command → calls gate.submit_evaluation()
-        # This happens on the coordinator thread BEFORE the next iteration, not during eval block.
-        # For a true bus round-trip, we submit from a watcher thread.
-
-        def submit_via_bus_commands():
+        def submit_from_thread():
             gate.evaluation_needed.wait(timeout=5)
-            # Simulate what _poll_bus_commands does when it finds the command
-            gate.submit_evaluation(0.88, "via bus")
+            gate.submit_evaluation(0.88, "from thread")
 
-        t = threading.Thread(target=submit_via_bus_commands, daemon=True)
+        t = threading.Thread(target=submit_from_thread, daemon=True)
         t.start()
 
         coordinator.run()
@@ -236,4 +214,4 @@ class TestEvalLoopIntegration:
         events = bridge.snapshot()
         eval_sub = next(e for e in events if e["event"] == "evaluation_submitted")
         assert eval_sub["score"] == 0.88
-        assert eval_sub["note"] == "via bus"
+        assert eval_sub["note"] == "from thread"
