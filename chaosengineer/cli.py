@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -171,6 +174,61 @@ def _check_resumable_session(output_dir: Path) -> dict | None:
     return None
 
 
+def _find_bus_binary() -> Path | None:
+    """Locate the chaos-bus binary: env var > repo path > system PATH."""
+    import shutil
+    env_path = os.environ.get("CHAOS_BUS_BIN")
+    if env_path and Path(env_path).is_file():
+        return Path(env_path)
+    # Development: relative to repo root (cli.py is in chaosengineer/)
+    repo_root = Path(__file__).parent.parent
+    dev_path = repo_root / "bus" / "chaos-bus"
+    if dev_path.is_file():
+        return dev_path
+    found = shutil.which("chaos-bus")
+    if found:
+        return Path(found)
+    return None
+
+
+def _start_bus(output_file: Path) -> tuple[subprocess.Popen | None, str | None]:
+    """Start the bus binary and return (process, bus_url) or (None, None)."""
+    binary = _find_bus_binary()
+    if binary is None:
+        return None, None
+
+    proc = subprocess.Popen(
+        [str(binary), "--port", "0", "--output-file", str(output_file),
+         "--shutdown-delay", "5s"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        port_line = proc.stdout.readline()
+        if not port_line:
+            proc.kill()
+            return None, None
+        port_data = json.loads(port_line)
+        bus_url = f"http://127.0.0.1:{port_data['port']}"
+
+        # Poll healthz until ready (up to 5 seconds)
+        import urllib.request
+        import time
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"{bus_url}/healthz", timeout=1)
+                return proc, bus_url
+            except Exception:
+                time.sleep(0.1)
+
+        proc.kill()
+        return None, None
+    except Exception:
+        proc.kill()
+        return None, None
+
+
 def _execute_run(args):
     """Execute a workload run with the specified backends."""
     # Run guard: check for resumable session
@@ -240,7 +298,10 @@ def _execute_run(args):
         scripted_results=args.scripted_results,
         run_id=run_id,
     )
-    logger = EventLogger(args.output_dir / "events.jsonl")
+    from chaosengineer.metrics.publisher import EventPublisher
+    log_path = args.output_dir / "events.jsonl"
+    bus_proc, bus_url = _start_bus(log_path)
+    logger = EventPublisher(bus_url=bus_url, fallback_path=log_path)
     budget = BudgetTracker(spec.budget)
 
     # Resolve initial baseline: CLI flag > workload spec > auto-detect
@@ -293,6 +354,8 @@ def _execute_run(args):
         coordinator.run()
     finally:
         pause_controller.uninstall()
+        if bus_proc:
+            bus_proc.terminate()
 
     print(f"\nRun complete:")
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")
@@ -413,7 +476,9 @@ def _execute_resume(args):
         scripted_results=getattr(args, "scripted_results", None),
         run_id=snapshot.run_id,
     )
-    logger = EventLogger(events_path)
+    from chaosengineer.metrics.publisher import EventPublisher
+    bus_proc, bus_url = _start_bus(events_path)
+    logger = EventPublisher(bus_url=bus_url, fallback_path=events_path)
 
     from chaosengineer.core.pause import PauseController
     from chaosengineer.core.status import StatusDisplay
@@ -448,6 +513,8 @@ def _execute_resume(args):
         )
     finally:
         pause_controller.uninstall()
+        if bus_proc:
+            bus_proc.terminate()
 
     print(f"\nRun complete:")
     print(f"  Best metric: {coordinator.best_baseline.metric_value}")
