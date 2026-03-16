@@ -80,7 +80,7 @@ class Coordinator:
         self._history.append(record)
 
     def _poll_bus_commands(self) -> None:
-        """Poll message bus for remote commands (pause, extend_budget)."""
+        """Poll message bus for remote commands (pause, extend_budget, submit_evaluation)."""
         if not hasattr(self.logger, "poll_commands"):
             return
         for cmd in self.logger.poll_commands():
@@ -92,6 +92,13 @@ class Coordinator:
                     add_experiments=cmd.get("add_experiments", 0),
                     add_time=cmd.get("add_time_seconds", 0),
                 )
+            elif cmd.get("command") == "submit_evaluation" and self._eval_gate:
+                score = cmd.get("score")
+                note = cmd.get("note", "")
+                if score is not None:
+                    self._eval_gate.submit_evaluation(float(score), note)
+                else:
+                    self._eval_gate.skip_evaluation()
 
     def _request_human_evaluation(self, exp: Experiment, result: ExperimentResult) -> float | None:
         """Block for human evaluation score. Returns score or None if skipped."""

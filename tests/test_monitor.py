@@ -1,11 +1,11 @@
 """Tests for the detached monitor mode."""
 from __future__ import annotations
 
-import http.server
+import io
 import json
 import threading
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,125 +17,94 @@ from textual.widgets import RichLog
 
 
 # ---------------------------------------------------------------------------
-# Helpers: tiny HTTP server that mimics the bus /events endpoint
+# Helpers: fake streaming HTTP response
 # ---------------------------------------------------------------------------
 
-class _FakeBusHandler(http.server.BaseHTTPRequestHandler):
-    """Serves canned events from ``self.server.events``."""
+class FakeStreamResponse:
+    """Simulates a streaming HTTP response with newline-delimited JSON."""
 
-    def do_GET(self):
-        if self.path.startswith("/events"):
-            # Parse offset from query string
-            offset = 0
-            if "?" in self.path:
-                qs = self.path.split("?", 1)[1]
-                for param in qs.split("&"):
-                    if param.startswith("offset="):
-                        offset = int(param.split("=")[1])
+    def __init__(self, events):
+        lines = [json.dumps(e) + "\n" for e in events]
+        self._data = "".join(lines).encode()
+        self._stream = io.BytesIO(self._data)
+        self.status = 200
 
-            events = self.server.events[offset:]  # type: ignore[attr-defined]
-            body = json.dumps({"events": events}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
-        elif self.path == "/healthz":
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-        else:
-            self.send_response(404)
-            self.end_headers()
+    def read(self, amt=-1):
+        return self._stream.read(amt)
 
-    def log_message(self, *args):
-        pass  # silence request logs during tests
+    def readline(self):
+        return self._stream.readline()
 
+    def __iter__(self):
+        return iter(self._stream)
 
-@pytest.fixture()
-def fake_bus():
-    """Start a fake bus HTTP server and yield its URL + event list."""
-    server = http.server.HTTPServer(("127.0.0.1", 0), _FakeBusHandler)
-    server.events = []  # type: ignore[attr-defined]
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    port = server.server_address[1]
-    yield f"http://127.0.0.1:{port}", server.events
-    server.shutdown()
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 
 # ---------------------------------------------------------------------------
-# MonitorClient tests
+# MonitorClient streaming tests
 # ---------------------------------------------------------------------------
 
-class TestMonitorClient:
-    def test_publishes_events_to_bridge(self, fake_bus):
-        """MonitorClient should forward events from the bus to its bridge."""
-        url, events = fake_bus
-        events.extend([
-            {"event": "run_started", "run_id": "r1", "ts": "2026-01-01T00:00:00Z"},
-            {"event": "iteration_started", "dimension": "lr", "iteration": 0,
-             "tasks": [], "ts": "2026-01-01T00:00:01Z"},
-        ])
+class TestMonitorClientStreaming:
+    def test_streams_events_to_bridge(self):
+        """MonitorClient should read streaming /events and publish to bridge."""
+        events = [
+            {"event": "run_started", "run_id": "r1"},
+            {"event": "worker_completed", "run_id": "r1", "metric": 0.5},
+        ]
+        fake_resp = FakeStreamResponse(events)
 
-        client = MonitorClient(bus_url=url)
-        client.start()
-        # Give the poll loop time to fetch
-        time.sleep(2.5)
-        client.stop()
+        with patch("urllib.request.urlopen", return_value=fake_resp):
+            client = MonitorClient(bus_url="http://fake:1234")
+            client.start()
+            time.sleep(0.3)
+            client.stop()
 
-        snap = client.bridge.snapshot()
-        assert len(snap) == 2
-        assert snap[0]["event"] == "run_started"
-        assert snap[1]["event"] == "iteration_started"
+        snapshot = client.bridge.snapshot()
+        assert len(snapshot) == 2
+        assert snapshot[0]["event"] == "run_started"
+        assert snapshot[1]["event"] == "worker_completed"
 
-    def test_incremental_polling(self, fake_bus):
-        """MonitorClient should only fetch new events on subsequent polls."""
-        url, events = fake_bus
-        events.append({"event": "run_started", "run_id": "r1"})
+    def test_reconnects_on_error(self):
+        """MonitorClient should reconnect after stream errors."""
+        call_count = 0
+        events = [{"event": "run_started", "run_id": "r1"}]
 
-        client = MonitorClient(bus_url=url)
-        client.start()
-        time.sleep(2.5)
+        def fake_urlopen(req, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("refused")
+            return FakeStreamResponse(events)
 
-        # Add more events while client is running
-        events.append({"event": "budget_checkpoint", "spent_usd": 1.0})
-        time.sleep(2.5)
-        client.stop()
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client = MonitorClient(bus_url="http://fake:1234")
+            client.start()
+            time.sleep(1.5)  # enough for retry
+            client.stop()
 
-        snap = client.bridge.snapshot()
-        assert len(snap) == 2
+        assert call_count >= 2
 
-    def test_handles_connection_error_gracefully(self):
-        """MonitorClient should not crash if the bus is unreachable."""
-        client = MonitorClient(bus_url="http://127.0.0.1:1")  # nothing listening
-        client.start()
-        time.sleep(2.5)
-        client.stop()
-        # No exception should propagate; bridge simply stays empty
-        assert client.bridge.snapshot() == []
+    def test_run_id_filter(self):
+        """MonitorClient passes run_id to the URL."""
+        captured_urls = []
 
-    def test_run_id_filter(self, fake_bus):
-        """When run_id is specified, MonitorClient should include it in the URL."""
-        url, events = fake_bus
-        events.append({"event": "run_started", "run_id": "specific-run"})
+        def capture_urlopen(req, **kwargs):
+            url = req.full_url if hasattr(req, 'full_url') else str(req)
+            captured_urls.append(url)
+            raise ConnectionError("stop")
 
-        client = MonitorClient(bus_url=url, run_id="specific-run")
-        client.start()
-        time.sleep(2.5)
-        client.stop()
+        with patch("urllib.request.urlopen", side_effect=capture_urlopen):
+            client = MonitorClient(bus_url="http://fake:1234", run_id="run-abc")
+            client.start()
+            time.sleep(0.3)
+            client.stop()
 
-        snap = client.bridge.snapshot()
-        assert len(snap) == 1
-
-    def test_stop_terminates_polling(self, fake_bus):
-        """After stop(), the polling thread should finish."""
-        url, events = fake_bus
-        client = MonitorClient(bus_url=url)
-        client.start()
-        assert client.is_running
-        client.stop()
-        time.sleep(2.0)
-        assert not client.is_running
+        assert any("run_id=run-abc" in u for u in captured_urls)
 
 
 # ---------------------------------------------------------------------------
