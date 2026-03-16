@@ -25,10 +25,12 @@ No gRPC or HTTP involved — the TUI is a view layer on the coordinator, not a b
 `EventBridge` is a thread-safe event store with two roles: ring buffer (history) and notification (live).
 
 ```python
+import queue  # stdlib thread-safe queue, NOT asyncio.Queue
+
 class EventBridge:
     def __init__(self, capacity: int = 200):
         self._buffer: deque[dict] = deque(maxlen=capacity)  # ring buffer
-        self._subscribers: list[asyncio.Queue] = []
+        self._subscribers: list[queue.Queue] = []
         self._lock: threading.Lock = threading.Lock()
 
     def publish(self, event: dict) -> None:
@@ -38,7 +40,7 @@ class EventBridge:
             for q in self._subscribers:
                 try:
                     q.put_nowait(event)
-                except asyncio.QueueFull:
+                except queue.Full:
                     pass  # slow consumer, skip
 
     def snapshot(self) -> list[dict]:
@@ -46,18 +48,20 @@ class EventBridge:
         with self._lock:
             return list(self._buffer)
 
-    def subscribe(self) -> asyncio.Queue[dict]:
-        """TUI calls this on activation. Returns a queue for live events."""
-        q: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
+    def subscribe(self) -> queue.Queue[dict]:
+        """TUI calls this on activation. Returns a thread-safe queue for live events."""
+        q: queue.Queue[dict] = queue.Queue(maxsize=500)
         with self._lock:
             self._subscribers.append(q)
         return q
 
-    def unsubscribe(self, q: asyncio.Queue) -> None:
+    def unsubscribe(self, q: queue.Queue) -> None:
         """TUI calls this on deactivation."""
         with self._lock:
             self._subscribers.remove(q)
 ```
+
+**Note:** We use `queue.Queue` (stdlib), not `asyncio.Queue`, because `publish()` is called from the coordinator thread while the TUI runs in a different thread/event loop. `queue.Queue` is thread-safe by design. The TUI polls via `set_interval` + `get_nowait()`.
 
 Event shape matches flat JSON format from `events.jsonl`:
 
@@ -198,8 +202,9 @@ if args.tui:
     bridge = EventBridge()
     pause_gate = PauseGate()
     publisher = EventPublisher(bus_url, fallback_path, bridge=bridge)
-    view_manager = ViewManager(bridge, pause_gate, pause_controller, coordinator)
-    coordinator = Coordinator(..., logger=publisher, view_manager=view_manager, pause_gate=pause_gate)
+    view_manager = ViewManager(bridge, pause_gate, pause_controller, coordinator, status_display)
+    coordinator = Coordinator(..., logger=publisher, status_display=status_display,
+                              view_manager=view_manager, pause_gate=pause_gate)
     # Run coordinator in background thread
     coord_thread = threading.Thread(target=coordinator.run, daemon=True)
     coord_thread.start()
