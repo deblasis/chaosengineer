@@ -1,5 +1,5 @@
 """Tests for the ChaosEngineer TUI app."""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -284,3 +284,116 @@ class TestCollapsibleIterations:
             assert data["status"] == "done"
             assert data["cost"] == 0.42
             assert data["metric"] == 0.85
+
+
+class TestChaosAppActions:
+    """Tests for action_pause, action_extend, and action_quit_tui."""
+
+    # --- action_pause tests ---
+
+    async def test_pause_sets_pause_requested(self, app):
+        """Pressing P sets pause_controller.pause_requested = True."""
+        async with app.run_test() as pilot:
+            app.action_pause()
+            assert app._pause_controller.pause_requested is True
+
+    async def test_pause_submits_decision_when_needed(self, app):
+        """When decision_needed is set, pressing P calls submit_decision('pause')."""
+        async with app.run_test() as pilot:
+            app._pause_gate.decision_needed.set()
+            app.action_pause()
+            assert app._pause_gate.decision == "pause"
+            assert app._pause_gate.decision_ready.is_set()
+
+    async def test_pause_does_not_submit_when_not_needed(self, app):
+        """When decision not needed, pause sets pause_requested but doesn't submit."""
+        async with app.run_test() as pilot:
+            assert not app._pause_gate.decision_needed.is_set()
+            app.action_pause()
+            assert app._pause_controller.pause_requested is True
+            assert app._pause_gate.decision is None
+            assert not app._pause_gate.decision_ready.is_set()
+
+    async def test_pause_logs_message(self, app):
+        """Pressing P writes 'Pause submitted' to the event log."""
+        async with app.run_test() as pilot:
+            log = app.query_one("#event-log", RichLog)
+            lines_before = len(log.lines)
+            app.action_pause()
+            assert len(log.lines) > lines_before
+            last_line = str(log.lines[-1])
+            assert "Pause submitted" in last_line
+
+    # --- action_extend tests ---
+
+    async def test_extend_calls_coordinator(self, app):
+        """Pressing E calls coordinator.extend_budget with correct args."""
+        async with app.run_test() as pilot:
+            app.action_extend()
+            app._coordinator.extend_budget.assert_called_once_with(
+                add_cost=5.0, add_experiments=5
+            )
+
+    async def test_extend_logs_message(self, app):
+        """Pressing E writes 'Budget extended' to the event log."""
+        async with app.run_test() as pilot:
+            log = app.query_one("#event-log", RichLog)
+            lines_before = len(log.lines)
+            app.action_extend()
+            assert len(log.lines) > lines_before
+            last_line = str(log.lines[-1])
+            assert "Budget extended" in last_line
+
+    # --- action_quit_tui tests ---
+
+    async def test_quit_submits_continue_when_decision_pending(self, app):
+        """When decision_needed is set, pressing Q calls submit_decision('continue')."""
+        async with app.run_test() as pilot:
+            app._pause_gate.decision_needed.set()
+            app.action_quit_tui()
+            assert app._pause_gate.decision == "continue"
+            assert app._pause_gate.decision_ready.is_set()
+
+    async def test_quit_unsubscribes_from_bridge(self, app):
+        """Q unsubscribes the event queue from the bridge."""
+        async with app.run_test() as pilot:
+            assert app._event_queue is not None
+            eq = app._event_queue
+            with patch.object(app._bridge, "unsubscribe") as mock_unsub:
+                app.action_quit_tui()
+                mock_unsub.assert_called_once_with(eq)
+
+    async def test_quit_exits_app(self, app):
+        """Q causes the app to exit."""
+        async with app.run_test() as pilot:
+            with patch.object(app, "exit") as mock_exit:
+                app.action_quit_tui()
+                mock_exit.assert_called_once()
+
+    # --- Keybinding tests ---
+
+    async def test_p_key_triggers_pause(self, app):
+        """P key triggers action_pause and sets pause_requested."""
+        async with app.run_test() as pilot:
+            await pilot.press("p")
+            assert app._pause_controller.pause_requested is True
+
+    async def test_e_key_triggers_extend(self, app):
+        """E key triggers action_extend and calls extend_budget."""
+        async with app.run_test() as pilot:
+            await pilot.press("e")
+            app._coordinator.extend_budget.assert_called_once_with(
+                add_cost=5.0, add_experiments=5
+            )
+
+    async def test_q_key_triggers_quit(self, app):
+        """Q key triggers action_quit_tui and exits."""
+        async with app.run_test() as pilot:
+            await pilot.press("q")
+            assert app.return_code is not None or not app.is_running
+
+    async def test_escape_triggers_quit(self, app):
+        """Escape key triggers action_quit_tui and exits."""
+        async with app.run_test() as pilot:
+            await pilot.press("escape")
+            assert app.return_code is not None or not app.is_running
