@@ -1,10 +1,16 @@
 # ChaosEngineer
 
-*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
+<p align="center">
+  <img src="docs/assets/logo.jpg" alt="ChaosEngineer logo" width="500">
+</p>
 
 ---
 
 ChaosEngineer is a fork of Karpathy's [autoresearch](README_AUTORESEARCH.md), evolved into a general-purpose parallel experimentation framework. While autoresearch gives you a single agent running experiments in a loop, ChaosEngineer adds LLM-driven experiment planning, parallel execution, budget tracking, a TUI dashboard, human-in-the-loop evaluation, and pause/resume — turning the original concept into something you can point at any optimization problem and let run unattended.
+
+<p align="center">
+  <img src="docs/assets/karpathy-quote.jpg" alt="Karpathy quote" width="500">
+</p>
 
 ## What it adds
 
