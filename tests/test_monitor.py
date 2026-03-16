@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from chaosengineer.tui.app import ChaosApp
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 from chaosengineer.tui.monitor import MonitorClient
 from chaosengineer.tui.pause_gate import PauseGate
 from textual.widgets import RichLog

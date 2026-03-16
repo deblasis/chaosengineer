@@ -144,7 +144,7 @@ class TestEventPublisher:
 
 class TestEventPublisherBridge:
     def test_publishes_to_bridge_when_provided(self, tmp_path):
-        from chaosengineer.tui.bridge import EventBridge
+        from chaosengineer.bus import EventBridge
 
         bridge = EventBridge()
         publisher = EventPublisher(bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge)
@@ -156,7 +156,7 @@ class TestEventPublisherBridge:
         assert snap[0]["run_id"] == "r1"
 
     def test_bridge_receives_all_events(self, tmp_path):
-        from chaosengineer.tui.bridge import EventBridge
+        from chaosengineer.bus import EventBridge
 
         bridge = EventBridge()
         publisher = EventPublisher(bus_url=None, fallback_path=tmp_path / "events.jsonl", bridge=bridge)

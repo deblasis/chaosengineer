@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from chaosengineer.tui.app import BudgetBar, ChaosApp
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 from chaosengineer.tui.pause_gate import PauseGate
 from textual.widgets import DataTable, RichLog, Static
 

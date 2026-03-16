@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from chaosengineer.core.coordinator import Coordinator
     from chaosengineer.core.pause import PauseController
     from chaosengineer.core.status import StatusDisplay
-    from chaosengineer.tui.bridge import EventBridge
+    from chaosengineer.bus import EventBridge
     from chaosengineer.tui.pause_gate import PauseGate
 
 

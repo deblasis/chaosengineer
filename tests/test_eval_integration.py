@@ -11,7 +11,7 @@ from chaosengineer.core.models import Baseline, BudgetConfig, ExperimentResult
 from chaosengineer.metrics.publisher import EventPublisher
 from chaosengineer.testing.executor import ScriptedExecutor
 from chaosengineer.testing.simulator import ScriptedDecisionMaker
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 from chaosengineer.tui.eval_gate import EvaluationGate
 from chaosengineer.workloads.parser import WorkloadSpec
 

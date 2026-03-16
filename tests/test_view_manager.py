@@ -5,7 +5,7 @@ import threading
 import pytest
 
 from chaosengineer.tui.views import ViewManager
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 from chaosengineer.tui.pause_gate import PauseGate
 
 

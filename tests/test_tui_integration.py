@@ -13,7 +13,7 @@ from chaosengineer.core.status import StatusDisplay
 from chaosengineer.metrics.publisher import EventPublisher
 from chaosengineer.testing.executor import ScriptedExecutor
 from chaosengineer.testing.simulator import ScriptedDecisionMaker
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 from chaosengineer.tui.pause_gate import PauseGate
 from chaosengineer.workloads.parser import WorkloadSpec
 

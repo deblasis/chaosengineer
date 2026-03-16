@@ -11,7 +11,7 @@ from textual.widgets import Button, DataTable, Input, Label, RichLog, Static
 
 if TYPE_CHECKING:
     from chaosengineer.core.pause import PauseController
-    from chaosengineer.tui.bridge import EventBridge
+    from chaosengineer.bus import EventBridge
     from chaosengineer.tui.eval_gate import EvaluationGate
     from chaosengineer.tui.pause_gate import PauseGate
 

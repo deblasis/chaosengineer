@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 
 
 class TestEventBridgePublish:

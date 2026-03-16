@@ -1,4 +1,4 @@
-"""EventBridge — in-memory event store connecting coordinator to TUI."""
+"""EventBridge — in-memory pub/sub event bus for ChaosEngineer."""
 from __future__ import annotations
 
 import queue
@@ -7,9 +7,9 @@ from collections import deque
 
 
 class EventBridge:
-    """Thread-safe event store with ring buffer (history) and live notification.
+    """Thread-safe event bus with ring buffer (history) and live notification.
 
-    The coordinator thread calls publish(). The TUI subscribes for live events
+    The coordinator thread calls publish(). The TUI and other consumers subscribe for live events
     and calls snapshot() for replay on toggle.
 
     Uses queue.Queue (stdlib thread-safe), NOT asyncio.Queue which is not

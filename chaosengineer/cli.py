@@ -315,7 +315,7 @@ def _execute_run(args):
     bus_proc, bus_url = _start_bus(log_path)
     logger = EventPublisher(bus_url=bus_url, fallback_path=log_path)
     if getattr(args, "tui", False):
-        from chaosengineer.tui.bridge import EventBridge
+        from chaosengineer.bus import EventBridge
         from chaosengineer.tui.pause_gate import PauseGate
         bridge = EventBridge()
         pause_gate = PauseGate()
@@ -527,7 +527,7 @@ def _execute_resume(args):
     bus_proc, bus_url = _start_bus(events_path)
     logger = EventPublisher(bus_url=bus_url, fallback_path=events_path)
     if getattr(args, "tui", False):
-        from chaosengineer.tui.bridge import EventBridge
+        from chaosengineer.bus import EventBridge
         from chaosengineer.tui.pause_gate import PauseGate
         bridge = EventBridge()
         pause_gate = PauseGate()

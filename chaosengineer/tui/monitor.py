@@ -6,7 +6,7 @@ import logging
 import threading
 import urllib.request
 
-from chaosengineer.tui.bridge import EventBridge
+from chaosengineer.bus import EventBridge
 
 logger = logging.getLogger(__name__)
 
