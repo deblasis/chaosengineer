@@ -5,11 +5,14 @@ import queue as _queue_mod
 from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
-from textual.widgets import DataTable, Label, RichLog, Static
+from textual.containers import Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Input, Label, RichLog, Static
 
 if TYPE_CHECKING:
     from chaosengineer.core.pause import PauseController
     from chaosengineer.tui.bridge import EventBridge
+    from chaosengineer.tui.eval_gate import EvaluationGate
     from chaosengineer.tui.pause_gate import PauseGate
 
 
@@ -53,6 +56,89 @@ class BudgetBar(Static):
         self.update(f"Cost: {cost_str}  Experiments: {exp_str}  [{self._elapsed}]")
 
 
+class EvaluationModal(ModalScreen[tuple[float | None, str]]):
+    """Modal screen for human-in-the-loop evaluation of an experiment."""
+
+    CSS = """
+    EvaluationModal {
+        align: center middle;
+    }
+    #eval-dialog {
+        width: 60;
+        height: auto;
+        max-height: 24;
+        padding: 1 2;
+        border: thick $primary;
+        background: $surface;
+    }
+    #eval-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #eval-details {
+        margin-bottom: 1;
+    }
+    #score-input {
+        margin-bottom: 1;
+    }
+    #note-input {
+        margin-bottom: 1;
+    }
+    #eval-buttons {
+        layout: horizontal;
+        height: auto;
+    }
+    #eval-buttons Button {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(self, experiment_id: str, details: dict) -> None:
+        super().__init__()
+        self.experiment_id = experiment_id
+        self.details = details
+
+    def compose(self) -> ComposeResult:
+        detail_lines = [f"Experiment: {self.experiment_id}"]
+        for key, value in self.details.items():
+            detail_lines.append(f"  {key}: {value}")
+        detail_text = "\n".join(detail_lines)
+
+        with Vertical(id="eval-dialog"):
+            yield Label("Evaluation Requested", id="eval-title")
+            yield Static(detail_text, id="eval-details")
+            yield Input(placeholder="Score (numeric)", id="score-input")
+            yield Input(placeholder="Note (optional)", id="note-input")
+            with Vertical(id="eval-buttons"):
+                yield Button("Submit", variant="primary", id="eval-submit")
+                yield Button("Skip", variant="default", id="eval-skip")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "eval-submit":
+            self._do_submit()
+        elif event.button.id == "eval-skip":
+            self.dismiss((None, ""))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in input fields."""
+        if event.input.id == "score-input":
+            self.query_one("#note-input", Input).focus()
+        elif event.input.id == "note-input":
+            self._do_submit()
+
+    def _do_submit(self) -> None:
+        score_text = self.query_one("#score-input", Input).value.strip()
+        note_text = self.query_one("#note-input", Input).value.strip()
+        if not score_text:
+            self.dismiss((None, ""))
+            return
+        try:
+            score = float(score_text)
+        except ValueError:
+            return  # stay open on invalid input
+        self.dismiss((score, note_text))
+
+
 class ChaosApp(App):
     """Main TUI application for ChaosEngineer."""
 
@@ -90,12 +176,14 @@ class ChaosApp(App):
     ]
 
     def __init__(self, bridge: "EventBridge", pause_gate: "PauseGate",
-                 coordinator, pause_controller: "PauseController"):
+                 coordinator, pause_controller: "PauseController",
+                 eval_gate: "EvaluationGate | None" = None):
         super().__init__()
         self._bridge = bridge
         self._pause_gate = pause_gate
         self._coordinator = coordinator
         self._pause_controller = pause_controller
+        self._eval_gate: "EvaluationGate | None" = eval_gate
         self._event_queue: "_queue_mod.Queue | None" = None
         # Iteration tracking for collapsible groups
         self._current_iteration: int | None = None
@@ -163,6 +251,8 @@ class ChaosApp(App):
             log.write("[bold red]RUN FAILED[/bold red]")
         elif event_type == "pause_decision_needed":
             self._on_pause_decision_needed(event)
+        elif event_type == "evaluation_requested":
+            self._on_evaluation_requested(event)
 
     def _event_summary(self, event: dict) -> str:
         """One-line summary of event data for the log."""
@@ -377,6 +467,29 @@ class ChaosApp(App):
                 if iteration not in self._collapsed:
                     self._collapse_iteration(iteration)
                 return
+
+    def _on_evaluation_requested(self, event: dict) -> None:
+        """Show evaluation modal when coordinator requests human input."""
+        experiment_id = event.get("experiment_id", "unknown")
+        details = {k: v for k, v in event.items() if k not in ("event", "ts")}
+        log = self.query_one("#event-log", RichLog)
+        log.write(f"[bold cyan]EVALUATION REQUESTED[/bold cyan] — {experiment_id}")
+
+        modal = EvaluationModal(experiment_id=experiment_id, details=details)
+        self.push_screen(modal, callback=self._on_evaluation_result)
+
+    def _on_evaluation_result(self, result: tuple[float | None, str]) -> None:
+        """Callback when evaluation modal is dismissed."""
+        score, note = result
+        log = self.query_one("#event-log", RichLog)
+        if score is not None:
+            log.write(f"[green]Evaluation submitted: score={score} note={note!r}[/green]")
+            if self._eval_gate is not None:
+                self._eval_gate.submit_evaluation(score, note)
+        else:
+            log.write("[yellow]Evaluation skipped[/yellow]")
+            if self._eval_gate is not None:
+                self._eval_gate.skip_evaluation()
 
     def action_pause(self) -> None:
         """Handle P key — pause the coordinator."""

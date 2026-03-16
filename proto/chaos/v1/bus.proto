@@ -10,6 +10,7 @@ service BusService {
   rpc Subscribe(SubscribeRequest) returns (stream Event);
   rpc PauseRun(PauseRunRequest) returns (PauseRunResponse);
   rpc ExtendBudget(ExtendBudgetRequest) returns (ExtendBudgetResponse);
+  rpc SubmitEvaluation(SubmitEvaluationRequest) returns (SubmitEvaluationResponse);
 }
 
 message SubscribeRequest {
@@ -26,3 +27,11 @@ message ExtendBudgetRequest {
   double add_time_seconds = 4;
 }
 message ExtendBudgetResponse {}
+
+message SubmitEvaluationRequest {
+  string run_id = 1;
+  string experiment_id = 2;
+  double score = 3;
+  string note = 4;
+}
+message SubmitEvaluationResponse {}
